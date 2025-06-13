@@ -15,7 +15,7 @@ static int str_to_int(char* str) {
 }
 
 /* The native object types used by the interpreter */
-typedef enum {NUMBER, SYMBOL, CONS, FUNCTION, NIL} Type;
+typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, NIL} Type;
 
 /**
  * All data used by the interpreter is an 'Object', represented
@@ -28,7 +28,7 @@ typedef struct Object {
     Type type;
     union {
         int num;
-        char* sym;
+        char* str;
         struct Cons {
             struct Object* car;
             struct Object* cdr;
@@ -41,6 +41,7 @@ static Object* object_new();
 static void object_free(Object* obj);
 static Object* number_new(int num);
 static Object* symbol_new(char* symbol);
+static Object* string_new(char* str);
 static Object* function_new(struct Object* (*fn)(struct Object** args));
 
 static void print(Object* obj);
@@ -200,8 +201,19 @@ static Object* symbol_new(char* symbol) {
     obj->type = SYMBOL;
 
     len = strlen(symbol);
-    obj->sym = (char*)malloc(sizeof(char) * (len + 1));
-    strcpy(obj->sym, symbol);
+    obj->str = (char*)malloc(sizeof(char) * (len + 1));
+    strcpy(obj->str, symbol);
+    return obj;
+}
+
+static Object* string_new(char* str) {
+    unsigned long len;
+    Object* obj = object_new();
+    obj->type = STRING;
+
+    len = strlen(str) - 1;
+    obj->str = (char*)malloc(sizeof(char) * (len + 1));
+    strcpy(obj->str, str + 1);
     return obj;
 }
 
@@ -236,8 +248,11 @@ static void object_free(Object* obj) {
         case NUMBER: {
             break;
         }
+        case STRING: {
+            break;
+        }
         case SYMBOL: {
-            free(obj->sym);
+            free(obj->str);
             break;
         }
         case CONS: {
@@ -439,17 +454,26 @@ static void print(Object* obj) {
             printf("%d", obj->num);
             break;
         }
+        case STRING:
         case SYMBOL: {
-            printf("%s", obj->sym);
+            printf("%s", obj->str);
             break;
         }
         case CONS: {
             putchar('(');
             Object* temp = obj;
             while (temp != NULL) {
-                print(car(temp));
+                if (temp->type == CONS) {
+                    print(car(temp));
+                } else {
+                    print(temp);
+                }
                 if (cdr(temp) != NULL) {
                     putchar(' ');
+                    if (cdr(temp)->type != CONS) {
+                        putchar('.');
+                        putchar(' ');
+                    }
                 }
                 temp = cdr(temp);
             }
@@ -544,6 +568,13 @@ static char is_symbol(char c) {
     return 0;
 }
 
+static char is_string(char c) {
+    if (c == '"') {
+        return 1;
+    }
+    return 0;
+}
+
 /**
  * Determines the next token in the input stream and stores
  * the generated token in the provided buffer. Buff is allocated
@@ -585,6 +616,18 @@ static char peek(char** str, char buff[]) {
             break;
         }
 
+        if (c == '"') {
+            consumed++;
+            *(buff++) = c;
+            c = *(temp++);
+            while (c != '"') {
+                consumed++;
+                *(buff++) = c;
+                c = *(temp++);
+            }
+            break;
+        }
+
         if (is_symbol(c)) {
             while (is_symbol(c)) {
                 consumed++;
@@ -617,7 +660,7 @@ static void next(char** str, char buff[]) {
  * @return - true or false
  */
 static char is_atom(char buff[]) {
-    if (is_number(*buff) || is_symbol(*buff)) {
+    if (is_number(*buff) || is_string(*buff) || is_symbol(*buff)) {
         return 1;
     }
     return 0;
@@ -658,7 +701,7 @@ static char is_type(Object* object, Type obj_type) {
 static char is_special_form(Object* cons) {
     Object* first = car(cons);
     if (is_type(first, SYMBOL)) {
-        char* sym = first->sym;
+        char* sym = first->str;
         if (strcmp(sym, "quote") == 0 ||
             strcmp(sym, "eval") == 0 ||
             strcmp(sym, "define") == 0 ||
@@ -681,7 +724,7 @@ static Object* eval_quote_special_form(Map* env, Object* obj) {
 static Object* eval_define_special_form(Map* env, Object* obj) {
     Object* name = car(cdr(obj));
     Object* value = car(cdr(cdr(obj)));
-    map_put(env, name->sym, eval(env, value));
+    map_put(env, name->str, eval(env, value));
     return NULL;
 }
 
@@ -699,16 +742,16 @@ static Object* eval_if_special_form(Map* env, Object* obj) {
  */
 static Object* eval_special_form(Map* env, Object* obj) {
     Object* first = car(obj);
-    if (strcmp(first->sym, "quote") == 0) {
+    if (strcmp(first->str, "quote") == 0) {
         return eval_quote_special_form(env, obj);
     }
-    if (strcmp(first->sym, "eval") == 0) {
+    if (strcmp(first->str, "eval") == 0) {
         return eval_eval_special_form(env, obj);
     }
-    if (strcmp(first->sym, "define") == 0) {
+    if (strcmp(first->str, "define") == 0) {
         return eval_define_special_form(env, obj);
     }
-    if (strcmp(first->sym, "if") == 0) {
+    if (strcmp(first->str, "if") == 0) {
         return eval_if_special_form(env, obj);
     }
     return NULL;
@@ -788,7 +831,7 @@ static Object* list(char** str) {
 }
 
 /**
- * atom : Integer | Symbol
+ * atom : Number | String | Symbol
  */
 static Object* atom(char** str) {
 
@@ -798,6 +841,8 @@ static Object* atom(char** str) {
 
     if (is_number(*buff)) {
         obj = number_new(str_to_int(buff));
+    } else if (is_string(*buff)) {
+        obj = string_new(buff);
     } else if (is_symbol(*buff)) {
         obj = symbol_new(buff);
     }
@@ -835,7 +880,7 @@ Object* eval(Map* env, Object* obj) {
     if (obj != NULL) {
         switch (obj->type) {
             case SYMBOL: {
-                res = map_get(env, obj->sym);
+                res = map_get(env, obj->str);
                 break;
             }
             case CONS: {
@@ -861,6 +906,29 @@ Object* builtin_car(Object* args[]) {
 
 Object* builtin_cdr(Object* args[]) {
     return cdr(args[0]);
+}
+
+Object* builtin_type(Object* args[]) {
+    Object* obj = args[0];
+    if (obj == NULL) {
+        return string_new("\"nil");
+    }
+    switch (obj->type) {
+        case NUMBER:
+            return string_new("\"number");
+        case SYMBOL:
+            return string_new("\"symbol");
+        case STRING:
+            return string_new("\"string");
+        case FUNCTION:
+            return string_new("\"function");
+        case CONS:
+            return string_new("\"cons");
+        case NIL:
+            return string_new("\"nil");
+        default:
+            return string_new("\"unknown");
+    }
 }
 
 Object* builtin_cons(Object* args[]) {
@@ -895,6 +963,7 @@ static void init_env(Map* env) {
 
     map_put(env, "car", function_new(builtin_car));
     map_put(env, "cdr", function_new(builtin_cdr));
+    map_put(env, "type", function_new(builtin_type));
     map_put(env, "cons", function_new(builtin_cons));
 
     map_put(env, "gc-mark", function_new(builtin_mark));

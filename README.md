@@ -22,7 +22,38 @@ The interpreter also has some built-in functions such as `+`, `car` and `cdr`.
 > (car (quote (+ 4 5 6)))
 +
 > (cdr (quote (5 4 3)))
-5
+(4 3)
+```
+
+Lists are represented using chains (linked lists) of cons cells. Printing of cons cells also works as expected.
+
+```lisp
+> (cons 1 (cons 2 (cons 3))) 
+(1 2 3)
+> (cons "a" "b")
+(a . b)
+> (cons 1 (cons 2 3))
+(1 2 . 3)
+```
+
+I've implemented various Lisp data types such as numbers, strings and symbols. Numbers are currently just C integers.
+
+```lisp
+> (type "hello world")
+string
+> (type (quote abc))
+symbol
+> (type 123)
+number
+```
+
+Quoting is common in Lisp and is supported by the `quote` special form. The shorthand `'` is not yet supported.
+
+```lisp
+> (quote (+ 1 2 3))
+(+ 1 2 3)
+> (+ 1 2 3)
+6
 ```
 
 I've implemented the beginnings of a simple mark and sweep garbage collector which can be triggered using two built-in functions.
