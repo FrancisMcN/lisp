@@ -67,3 +67,12 @@ freed 6 objects.
 nil
 >
 ```
+
+The garbage collector is now automatically triggered after every 100 object allocations which is too frequent and too simple but it'll work for now.
+
+The interpreter can also execute multiple Lisp expressions in sequence and it can run programs directly from text files.
+```lisp
+> (+ 1 2 3) (+ 3 4 5)
+6
+12
+```
