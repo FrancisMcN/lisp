@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>~/Documents/GitHub/l/lisp.c.html</title>
+<title>~/Documents/GitHub/lisp/lisp/lisp.c.html</title>
 <meta name="Generator" content="Vim/9.1">
 <meta name="plugin-version" content="vim9.0_v2">
 <meta name="syntax" content="c">
@@ -30,6 +30,8 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
 
 <span class="PreProc">#define BUFF_SIZE </span><span class="Constant">256</span>
 <span class="PreProc">#define MAX_FUNC_ARGS </span><span class="Constant">64</span>
+<span class="PreProc">#define INITIAL_ENV_SIZE </span><span class="Constant">8</span>
+<span class="PreProc">#define GC_INTERVAL </span><span class="Constant">100</span>
 
 <span class="Comment">/*</span><span class="Comment">*</span>
 <span class="Comment"> * Converts a string to an integer</span>
@@ -41,7 +43,7 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
 }
 
 <span class="Comment">/*</span><span class="Comment"> The native object types used by the interpreter </span><span class="Comment">*/</span>
-<span class="Type">typedef</span> <span class="Type">enum</span> {NUMBER, SYMBOL, CONS, FUNCTION, NIL} Type;
+<span class="Type">typedef</span> <span class="Type">enum</span> {NUMBER, SYMBOL, STRING, CONS, FUNCTION, NIL} Type;
 
 <span class="Comment">/*</span><span class="Comment">*</span>
 <span class="Comment"> * All data used by the interpreter is an 'Object', represented</span>
@@ -54,7 +56,7 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
     Type type;
     <span class="Type">union</span> {
         <span class="Type">int</span> num;
-        <span class="Type">char</span>* sym;
+        <span class="Type">char</span>* str;
         <span class="Type">struct</span> Cons {
             <span class="Type">struct</span> Object* car;
             <span class="Type">struct</span> Object* cdr;
@@ -67,6 +69,7 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
 <span class="Type">static</span> <span class="Type">void</span> object_free(Object* obj);
 <span class="Type">static</span> Object* number_new(<span class="Type">int</span> num);
 <span class="Type">static</span> Object* symbol_new(<span class="Type">char</span>* symbol);
+<span class="Type">static</span> Object* string_new(<span class="Type">char</span>* str);
 <span class="Type">static</span> Object* function_new(<span class="Type">struct</span> Object* (*fn)(<span class="Type">struct</span> Object** args));
 
 <span class="Type">static</span> <span class="Type">void</span> print(Object* obj);
@@ -102,12 +105,13 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
 <span class="Comment"> </span><span class="Comment">*/</span>
 <span class="Type">typedef</span> <span class="Type">struct</span> GC {
     Object* tail;
-
+    <span class="Type">size_t</span> objects_since_last_collection;
     Map* env;
 } GC;
 
 <span class="Type">static</span> GC* gc_new(Map* env) {
     GC* gc = malloc(<span class="Statement">sizeof</span>(GC));
+    gc-&gt;objects_since_last_collection = <span class="Constant">0</span>;
     gc-&gt;env = env;
     <span class="Statement">return</span> gc;
 }
@@ -170,6 +174,8 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
 
     }
 
+    gc-&gt;objects_since_last_collection = <span class="Constant">0</span>;
+
     printf(<span class="Constant">&quot;freed </span><span class="Special">%zu</span><span class="Constant"> objects.</span><span class="Special">\n</span><span class="Constant">&quot;</span>, count);
 
 }
@@ -199,6 +205,7 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
         obj-&gt;prev = gc-&gt;tail;
         gc-&gt;tail = obj;
     }
+    gc-&gt;objects_since_last_collection++;
 
     <span class="Statement">return</span> obj;
 }
@@ -226,8 +233,19 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
     obj-&gt;type = SYMBOL;
 
     len = strlen(symbol);
-    obj-&gt;sym = (<span class="Type">char</span>*)malloc(<span class="Statement">sizeof</span>(<span class="Type">char</span>) * (len + <span class="Constant">1</span>));
-    strcpy(obj-&gt;sym, symbol);
+    obj-&gt;str = (<span class="Type">char</span>*)malloc(<span class="Statement">sizeof</span>(<span class="Type">char</span>) * (len + <span class="Constant">1</span>));
+    strcpy(obj-&gt;str, symbol);
+    <span class="Statement">return</span> obj;
+}
+
+<span class="Type">static</span> Object* string_new(<span class="Type">char</span>* str) {
+    <span class="Type">unsigned</span> <span class="Type">long</span> len;
+    Object* obj = object_new();
+    obj-&gt;type = STRING;
+
+    len = strlen(str) - <span class="Constant">1</span>;
+    obj-&gt;str = (<span class="Type">char</span>*)malloc(<span class="Statement">sizeof</span>(<span class="Type">char</span>) * (len + <span class="Constant">1</span>));
+    strcpy(obj-&gt;str, str + <span class="Constant">1</span>);
     <span class="Statement">return</span> obj;
 }
 
@@ -262,8 +280,11 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
         <span class="Statement">case</span> NUMBER: {
             <span class="Statement">break</span>;
         }
+        <span class="Statement">case</span> STRING: {
+            <span class="Statement">break</span>;
+        }
         <span class="Statement">case</span> SYMBOL: {
-            free(obj-&gt;sym);
+            free(obj-&gt;str);
             <span class="Statement">break</span>;
         }
         <span class="Statement">case</span> CONS: {
@@ -286,12 +307,17 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
 <span class="Comment"> * Initialises a new map</span>
 <span class="Comment"> * @return - returns a new, empty map</span>
 <span class="Comment"> </span><span class="Comment">*/</span>
-<span class="Type">static</span> Map* map_new() {
-    <span class="Type">unsigned</span> <span class="Type">long</span> initial_size = <span class="Constant">8</span>;
+<span class="Type">static</span> Map* map_new(<span class="Type">size_t</span> size) {
+
+    <span class="Type">int</span> i;
     Map* map = (Map*)malloc(<span class="Statement">sizeof</span>(Map));
     map-&gt;used = <span class="Constant">0</span>;
-    map-&gt;size = initial_size;
-    map-&gt;data = malloc(<span class="Statement">sizeof</span>(MapEntry) * initial_size);
+    map-&gt;size = size;
+    map-&gt;data = malloc(<span class="Statement">sizeof</span>(MapEntry) * size);
+<span class="Comment">//    for (i = 0; i &lt; map-&gt;size; i++) {</span>
+<span class="Comment">//        map-&gt;data[i].key = NULL;</span>
+<span class="Comment">//        map-&gt;data[].value = NULL;</span>
+<span class="Comment">//    }</span>
     <span class="Statement">return</span> map;
 }
 
@@ -310,32 +336,23 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
     <span class="Statement">return</span> hash;
 }
 
-<span class="Comment">/*</span><span class="Comment">*</span>
-<span class="Comment"> * Re-sizes a map / hash table, each time doubling the size of the table. The</span>
-<span class="Comment"> * table is doubled in size because resizing is an expensive operation, doubling each</span>
-<span class="Comment"> * time means the resize operation becomes less and less frequent as the table grows.</span>
-<span class="Comment"> * @param map - the map to resize</span>
-<span class="Comment"> </span><span class="Comment">*/</span>
 <span class="Type">static</span> <span class="Type">void</span> map_resize(Map* map) {
-    <span class="Type">int</span> i;
-    <span class="Comment">/*</span><span class="Comment"> Increase map size </span><span class="Comment">*/</span>
-    map-&gt;size = map-&gt;size * <span class="Constant">2</span>;
-    <span class="Comment">/*</span><span class="Comment"> Allocate empty block of data </span><span class="Comment">*/</span>
-    MapEntry* new_data = malloc(<span class="Statement">sizeof</span>(MapEntry) * map-&gt;size);
 
-    <span class="Comment">/*</span><span class="Comment"> Re-hash all the existing data </span><span class="Comment">*/</span>
-    MapEntry* old_data = map-&gt;data;
-    map-&gt;data = new_data;
-    <span class="Type">size_t</span> used = map-&gt;used;
-    <span class="Statement">for</span> (i = <span class="Constant">0</span>; i &lt; map-&gt;used; i++) {
-        <span class="Statement">if</span> (old_data[i].key != <span class="Constant">NULL</span>) {
-            map_put(map, old_data[i].key, old_data[i].value);
+    <span class="Type">size_t</span> existing_map_size = map-&gt;size;
+    <span class="Type">size_t</span> new_map_size = existing_map_size * <span class="Constant">2</span>;
+    <span class="Type">size_t</span> i;
+
+    Map* new_map = map_new(new_map_size);
+    <span class="Statement">for</span> (i = <span class="Constant">0</span>; i &lt; map-&gt;size; i++) {
+        <span class="Statement">if</span> (map-&gt;data[i].key != <span class="Constant">NULL</span>) {
+            map_put(new_map, map-&gt;data[i].key, map-&gt;data[i].value);
         }
     }
-    map-&gt;used = used;
 
-    <span class="Comment">/*</span><span class="Comment"> Free old block of memory </span><span class="Comment">*/</span>
-    free(old_data);
+    free(map-&gt;data);
+    map-&gt;size = new_map-&gt;size;
+    map-&gt;data = new_map-&gt;data;
+    map-&gt;used = new_map-&gt;used;
 
 }
 
@@ -406,7 +423,7 @@ body { font-family: monospace; color: #000000; background-color: #ffffff; }
 
         <span class="Comment">/*</span><span class="Comment"> Found a collision, iterate over the rest of the table to find the map entry if it exists </span><span class="Comment">*/</span>
         <span class="Statement">while</span> (map-&gt;data[key_hash].key != <span class="Constant">NULL</span>) {
-
+            <span class="Type">char</span>* x = map-&gt;data[key_hash].key;
             <span class="Comment">/*</span><span class="Comment"> Found the object after the collision, return the object </span><span class="Comment">*/</span>
             <span class="Statement">if</span> (strcmp(map-&gt;data[key_hash].key, key) == <span class="Constant">0</span>) {
                 <span class="Comment">/*</span><span class="Comment"> Found the item, return the object </span><span class="Comment">*/</span>
@@ -453,43 +470,56 @@ Object* eval(Map* env, Object* obj);
     <span class="Statement">return</span> <span class="Constant">NULL</span>;
 }
 
-<span class="Type">static</span> <span class="Type">void</span> print(Object* obj) {
+<span class="Type">static</span> <span class="Type">void</span> fprint(<span class="Type">FILE</span>* fp, Object* obj) {
 
     <span class="Statement">if</span> (obj == <span class="Constant">NULL</span>) {
-        printf(<span class="Constant">&quot;nil&quot;</span>);
+        fprintf(fp, <span class="Constant">&quot;nil&quot;</span>);
         <span class="Statement">return</span>;
     }
 
     <span class="Statement">switch</span> (obj-&gt;type) {
         <span class="Statement">case</span> NUMBER: {
-            printf(<span class="Constant">&quot;</span><span class="Special">%d</span><span class="Constant">&quot;</span>, obj-&gt;num);
+            fprintf(fp, <span class="Constant">&quot;</span><span class="Special">%d</span><span class="Constant">&quot;</span>, obj-&gt;num);
             <span class="Statement">break</span>;
         }
+        <span class="Statement">case</span> STRING:
         <span class="Statement">case</span> SYMBOL: {
-            printf(<span class="Constant">&quot;</span><span class="Special">%s</span><span class="Constant">&quot;</span>, obj-&gt;sym);
+            fprintf(fp, <span class="Constant">&quot;</span><span class="Special">%s</span><span class="Constant">&quot;</span>, obj-&gt;str);
             <span class="Statement">break</span>;
         }
         <span class="Statement">case</span> CONS: {
-            putchar(<span class="Constant">'('</span>);
+            putc(<span class="Constant">'('</span>, fp);
             Object* temp = obj;
             <span class="Statement">while</span> (temp != <span class="Constant">NULL</span>) {
-                print(car(temp));
+                <span class="Statement">if</span> (temp-&gt;type == CONS) {
+                    fprint(fp, car(temp));
+                } <span class="Statement">else</span> {
+                    fprint(fp, temp);
+                }
                 <span class="Statement">if</span> (cdr(temp) != <span class="Constant">NULL</span>) {
-                    putchar(<span class="Constant">' '</span>);
+                    putc(<span class="Constant">' '</span>, fp);
+                    <span class="Statement">if</span> (cdr(temp)-&gt;type != CONS) {
+                        putc(<span class="Constant">'.'</span>, fp);
+                        putc(<span class="Constant">' '</span>, fp);
+                    }
                 }
                 temp = cdr(temp);
             }
-            putchar(<span class="Constant">')'</span>);
+            putc(<span class="Constant">')'</span>, fp);
             <span class="Statement">break</span>;
         }
         <span class="Statement">case</span> FUNCTION: {
-            printf(<span class="Constant">&quot;</span><span class="Special">%p</span><span class="Constant">&quot;</span>, obj-&gt;fn);
+            fprintf(fp, <span class="Constant">&quot;</span><span class="Special">%p</span><span class="Constant">&quot;</span>, obj-&gt;fn);
             <span class="Statement">break</span>;
         }
         <span class="Statement">case</span> NIL: {
             <span class="Statement">break</span>;
         }
     }
+}
+
+<span class="Type">static</span> <span class="Type">void</span> print(Object* obj) {
+    fprint(<span class="Constant">stdout</span>, obj);
 }
 
 <span class="Comment">/*</span><span class="Comment">*</span>
@@ -570,6 +600,13 @@ Object* eval(Map* env, Object* obj);
     <span class="Statement">return</span> <span class="Constant">0</span>;
 }
 
+<span class="Type">static</span> <span class="Type">char</span> is_string(<span class="Type">char</span> c) {
+    <span class="Statement">if</span> (c == <span class="Constant">'&quot;'</span>) {
+        <span class="Statement">return</span> <span class="Constant">1</span>;
+    }
+    <span class="Statement">return</span> <span class="Constant">0</span>;
+}
+
 <span class="Comment">/*</span><span class="Comment">*</span>
 <span class="Comment"> * Determines the next token in the input stream and stores</span>
 <span class="Comment"> * the generated token in the provided buffer. Buff is allocated</span>
@@ -589,17 +626,24 @@ Object* eval(Map* env, Object* obj);
 
     <span class="Statement">while</span> (c != <span class="Constant">0</span>) {
 
-        consumed++;
         c = *(temp++);
 
         <span class="Statement">if</span> (c == <span class="Constant">'('</span>) {
+            consumed++;
             *buff = <span class="Constant">'('</span>;
             <span class="Statement">break</span>;
         }
 
         <span class="Statement">if</span> (c == <span class="Constant">')'</span>) {
+            consumed++;
             *buff = <span class="Constant">')'</span>;
             <span class="Statement">break</span>;
+        }
+
+        <span class="Comment">/*</span><span class="Comment"> Ignore whitespace and newlines </span><span class="Comment">*/</span>
+        <span class="Statement">if</span> (c == <span class="Constant">' '</span> || c == <span class="Special">'\n'</span>) {
+            consumed++;
+            <span class="Statement">continue</span>;
         }
 
         <span class="Statement">if</span> (is_number(c)) {
@@ -607,6 +651,28 @@ Object* eval(Map* env, Object* obj);
                 consumed++;
                 *(buff++) = c;
                 c = *(temp++);
+            }
+            <span class="Statement">break</span>;
+        }
+
+        <span class="Statement">if</span> (c == <span class="Constant">'&quot;'</span>) {
+            consumed++;
+            *(buff++) = c;
+            c = *(temp++);
+            <span class="Statement">while</span> (c != <span class="Constant">'&quot;'</span>) {
+                consumed++;
+                *(buff++) = c;
+                c = *(temp++);
+            }
+            consumed++;
+            <span class="Statement">break</span>;
+        }
+
+        <span class="Comment">/*</span><span class="Comment"> Everything after ; is part of a comment until the next newline </span><span class="Comment">*/</span>
+        <span class="Statement">if</span> (c == <span class="Constant">';'</span>) {
+            <span class="Statement">while</span> (c != <span class="Special">'\n'</span>) {
+                c = *(temp++);
+                consumed++;
             }
             <span class="Statement">break</span>;
         }
@@ -643,7 +709,7 @@ Object* eval(Map* env, Object* obj);
 <span class="Comment"> * @return - true or false</span>
 <span class="Comment"> </span><span class="Comment">*/</span>
 <span class="Type">static</span> <span class="Type">char</span> is_atom(<span class="Type">char</span> buff[]) {
-    <span class="Statement">if</span> (is_number(*buff) || is_symbol(*buff)) {
+    <span class="Statement">if</span> (is_number(*buff) || is_string(*buff) || is_symbol(*buff)) {
         <span class="Statement">return</span> <span class="Constant">1</span>;
     }
     <span class="Statement">return</span> <span class="Constant">0</span>;
@@ -684,7 +750,7 @@ Object* eval(Map* env, Object* obj);
 <span class="Type">static</span> <span class="Type">char</span> is_special_form(Object* cons) {
     Object* first = car(cons);
     <span class="Statement">if</span> (is_type(first, SYMBOL)) {
-        <span class="Type">char</span>* sym = first-&gt;sym;
+        <span class="Type">char</span>* sym = first-&gt;str;
         <span class="Statement">if</span> (strcmp(sym, <span class="Constant">&quot;quote&quot;</span>) == <span class="Constant">0</span> ||
             strcmp(sym, <span class="Constant">&quot;eval&quot;</span>) == <span class="Constant">0</span> ||
             strcmp(sym, <span class="Constant">&quot;define&quot;</span>) == <span class="Constant">0</span> ||
@@ -707,7 +773,7 @@ Object* eval(Map* env, Object* obj);
 <span class="Type">static</span> Object* eval_define_special_form(Map* env, Object* obj) {
     Object* name = car(cdr(obj));
     Object* value = car(cdr(cdr(obj)));
-    map_put(env, name-&gt;sym, eval(env, value));
+    map_put(env, name-&gt;str, eval(env, value));
     <span class="Statement">return</span> <span class="Constant">NULL</span>;
 }
 
@@ -725,16 +791,16 @@ Object* eval(Map* env, Object* obj);
 <span class="Comment"> </span><span class="Comment">*/</span>
 <span class="Type">static</span> Object* eval_special_form(Map* env, Object* obj) {
     Object* first = car(obj);
-    <span class="Statement">if</span> (strcmp(first-&gt;sym, <span class="Constant">&quot;quote&quot;</span>) == <span class="Constant">0</span>) {
+    <span class="Statement">if</span> (strcmp(first-&gt;str, <span class="Constant">&quot;quote&quot;</span>) == <span class="Constant">0</span>) {
         <span class="Statement">return</span> eval_quote_special_form(env, obj);
     }
-    <span class="Statement">if</span> (strcmp(first-&gt;sym, <span class="Constant">&quot;eval&quot;</span>) == <span class="Constant">0</span>) {
+    <span class="Statement">if</span> (strcmp(first-&gt;str, <span class="Constant">&quot;eval&quot;</span>) == <span class="Constant">0</span>) {
         <span class="Statement">return</span> eval_eval_special_form(env, obj);
     }
-    <span class="Statement">if</span> (strcmp(first-&gt;sym, <span class="Constant">&quot;define&quot;</span>) == <span class="Constant">0</span>) {
+    <span class="Statement">if</span> (strcmp(first-&gt;str, <span class="Constant">&quot;define&quot;</span>) == <span class="Constant">0</span>) {
         <span class="Statement">return</span> eval_define_special_form(env, obj);
     }
-    <span class="Statement">if</span> (strcmp(first-&gt;sym, <span class="Constant">&quot;if&quot;</span>) == <span class="Constant">0</span>) {
+    <span class="Statement">if</span> (strcmp(first-&gt;str, <span class="Constant">&quot;if&quot;</span>) == <span class="Constant">0</span>) {
         <span class="Statement">return</span> eval_if_special_form(env, obj);
     }
     <span class="Statement">return</span> <span class="Constant">NULL</span>;
@@ -750,6 +816,13 @@ Object* eval(Map* env, Object* obj);
     <span class="Type">int</span> i;
     Object* function = eval(env, car(obj));
     Object* args[MAX_FUNC_ARGS] = {<span class="Constant">0</span>};
+
+    <span class="Statement">if</span> (function == <span class="Constant">NULL</span>) {
+        fprintf(<span class="Constant">stderr</span>, <span class="Constant">&quot;function '&quot;</span>);
+        fprint(<span class="Constant">stderr</span>, car(obj));
+        fprintf(<span class="Constant">stderr</span>, <span class="Constant">&quot;' is undefined.</span><span class="Special">\n</span><span class="Constant">&quot;</span>);
+        <span class="Statement">return</span> <span class="Constant">NULL</span>;
+    }
 
     Object* temp = obj;
     i = <span class="Constant">0</span>;
@@ -810,11 +883,15 @@ Object* eval(Map* env, Object* obj);
     prev-&gt;cons.cdr = <span class="Constant">NULL</span>;
 
     next(str, buff);
+    <span class="Statement">if</span> (strcmp(buff, <span class="Constant">&quot;)&quot;</span>) != <span class="Constant">0</span>) {
+        fprintf(<span class="Constant">stderr</span>, <span class="Constant">&quot;syntax error: missing expected ')'</span><span class="Special">\n</span><span class="Constant">&quot;</span>);
+        <span class="Statement">return</span> <span class="Constant">NULL</span>;
+    }
     <span class="Statement">return</span> obj;
 }
 
 <span class="Comment">/*</span><span class="Comment">*</span>
-<span class="Comment"> * atom : Integer | Symbol</span>
+<span class="Comment"> * atom : Number | String | Symbol</span>
 <span class="Comment"> </span><span class="Comment">*/</span>
 <span class="Type">static</span> Object* atom(<span class="Type">char</span>** str) {
 
@@ -824,6 +901,8 @@ Object* eval(Map* env, Object* obj);
 
     <span class="Statement">if</span> (is_number(*buff)) {
         obj = number_new(str_to_int(buff));
+    } <span class="Statement">else</span> <span class="Statement">if</span> (is_string(*buff)) {
+        obj = string_new(buff);
     } <span class="Statement">else</span> <span class="Statement">if</span> (is_symbol(*buff)) {
         obj = symbol_new(buff);
     }
@@ -861,7 +940,7 @@ Object* eval(Map* env, Object* obj) {
     <span class="Statement">if</span> (obj != <span class="Constant">NULL</span>) {
         <span class="Statement">switch</span> (obj-&gt;type) {
             <span class="Statement">case</span> SYMBOL: {
-                res = map_get(env, obj-&gt;sym);
+                res = map_get(env, obj-&gt;str);
                 <span class="Statement">break</span>;
             }
             <span class="Statement">case</span> CONS: {
@@ -889,8 +968,37 @@ Object* builtin_cdr(Object* args[]) {
     <span class="Statement">return</span> cdr(args[<span class="Constant">0</span>]);
 }
 
+Object* builtin_type(Object* args[]) {
+    Object* obj = args[<span class="Constant">0</span>];
+    <span class="Statement">if</span> (obj == <span class="Constant">NULL</span>) {
+        <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">nil&quot;</span>);
+    }
+    <span class="Statement">switch</span> (obj-&gt;type) {
+        <span class="Statement">case</span> NUMBER:
+            <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">number&quot;</span>);
+        <span class="Statement">case</span> SYMBOL:
+            <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">symbol&quot;</span>);
+        <span class="Statement">case</span> STRING:
+            <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">string&quot;</span>);
+        <span class="Statement">case</span> FUNCTION:
+            <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">function&quot;</span>);
+        <span class="Statement">case</span> CONS:
+            <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">cons&quot;</span>);
+        <span class="Statement">case</span> NIL:
+            <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">nil&quot;</span>);
+        <span class="Statement">default</span>:
+            <span class="Statement">return</span> string_new(<span class="Constant">&quot;</span><span class="Special">\&quot;</span><span class="Constant">unknown&quot;</span>);
+    }
+}
+
 Object* builtin_cons(Object* args[]) {
     <span class="Statement">return</span> cons_new(args[<span class="Constant">0</span>], args[<span class="Constant">1</span>]);
+}
+
+Object* builtin_print(Object* args[]) {
+    print(args[<span class="Constant">0</span>]);
+    printf(<span class="Constant">&quot;</span><span class="Special">\n</span><span class="Constant">&quot;</span>);
+    <span class="Statement">return</span> <span class="Constant">NULL</span>;
 }
 
 Object* builtin_mark(Object* args[]) {
@@ -921,53 +1029,103 @@ Object* builtin_plus(Object* args[]) {
 
     map_put(env, <span class="Constant">&quot;car&quot;</span>, function_new(builtin_car));
     map_put(env, <span class="Constant">&quot;cdr&quot;</span>, function_new(builtin_cdr));
+    map_put(env, <span class="Constant">&quot;type&quot;</span>, function_new(builtin_type));
     map_put(env, <span class="Constant">&quot;cons&quot;</span>, function_new(builtin_cons));
+    map_put(env, <span class="Constant">&quot;print&quot;</span>, function_new(builtin_print));
 
     map_put(env, <span class="Constant">&quot;gc-mark&quot;</span>, function_new(builtin_mark));
     map_put(env, <span class="Constant">&quot;gc-sweep&quot;</span>, function_new(builtin_sweep));
 
     map_put(env, <span class="Constant">&quot;+&quot;</span>, function_new(builtin_plus));
 
+}
+
+<span class="Comment">/*</span><span class="Comment">*</span>
+<span class="Comment"> * Reads text data from a file pointer where the data is of arbitrary length.</span>
+<span class="Comment"> * @param fp - the file pointer to read the data from</span>
+<span class="Comment"> * @return - a malloc'd string of characters of arbitrary length</span>
+<span class="Comment"> </span><span class="Comment">*/</span>
+<span class="Type">static</span> <span class="Type">char</span>* read_string(<span class="Type">FILE</span>* fp) {
+
+    <span class="Type">size_t</span> p = <span class="Constant">0</span>;
+    <span class="Type">size_t</span> buff_size = BUFF_SIZE;
+    <span class="Comment">// char* buff = malloc(buff_size * sizeof(char));</span>
+    <span class="Type">char</span>* buff = malloc(buff_size * <span class="Statement">sizeof</span>(<span class="Type">char</span>));
+
+    <span class="Statement">while</span> (!feof(fp) &amp;&amp; !ferror(fp)) {
+
+        <span class="Type">char</span> temp[BUFF_SIZE] = {<span class="Constant">0</span>};
+        <span class="Statement">if</span> (fgets(temp, BUFF_SIZE, fp) != <span class="Constant">NULL</span>) {
+            memcpy(buff + p, temp, strlen(temp));
+            p += strlen(temp);
+            <span class="Comment">/*</span><span class="Comment"> if next line will overfill the buffer, allocate extra space </span><span class="Comment">*/</span>
+            <span class="Statement">if</span> (p + BUFF_SIZE &gt; buff_size ) {
+                buff = realloc(buff, buff_size * <span class="Statement">sizeof</span>(<span class="Type">char</span>));
+            }
+        }
+    }
+
+    <span class="Statement">return</span> buff;
+}
+
+<span class="Type">static</span> <span class="Type">void</span> exec(Map* env, <span class="Type">char</span>* str) {
+    Object* obj;
+    Object* res;
+
+    <span class="Statement">while</span> (strlen(str) &gt; <span class="Constant">0</span>) {
+
+        obj = parse(&amp;str);
+
+        res = eval(env, obj);
+        <span class="Comment">/*</span><span class="Comment"> Suppress nil in the REPL output </span><span class="Comment">*/</span>
+        <span class="Statement">if</span> (res != <span class="Constant">NULL</span>) {
+            print(res);
+            printf(<span class="Constant">&quot;</span><span class="Special">\n</span><span class="Constant">&quot;</span>);
+        }
+
+        <span class="Statement">if</span> (gc-&gt;objects_since_last_collection &gt;= GC_INTERVAL) {
+            gc_mark(gc);
+            gc_sweep(gc);
+        }
+
+    }
 
 }
 
 <span class="Comment">/*</span><span class="Comment">*</span>
 <span class="Comment"> * Provides a Read-Eval-Print-Loop to the Lisp interpreter.</span>
 <span class="Comment"> </span><span class="Comment">*/</span>
-<span class="Type">static</span> <span class="Type">void</span> repl() {
-    Object* obj;
-    Object* res;
-    <span class="Type">char</span> buff[BUFF_SIZE] = {<span class="Constant">0</span>};
+<span class="Type">static</span> <span class="Type">void</span> repl(Map* env) {
 
-    Map* env = map_new();
-    gc = gc_new(env);
-    init_env(env);
+    <span class="Type">char</span> buff[BUFF_SIZE] = {<span class="Constant">0</span>};
 
     <span class="Statement">while</span> (strcmp(buff, <span class="Constant">&quot;(exit)&quot;</span>) != <span class="Constant">0</span>) {
         printf(<span class="Constant">&quot;&gt; &quot;</span>);
         read_stdin(buff);
+        exec(env, buff);
+    }
 
-        <span class="Statement">if</span> (buff[<span class="Constant">0</span>] == <span class="Special">'\n'</span>) {
-            <span class="Statement">continue</span>;
-        }
+}
 
-        obj = read(buff);
+<span class="Type">int</span> main(<span class="Type">int</span> argc, <span class="Type">char</span> *argv[]) {
 
-        res = eval(env, obj);
+    Map* env = map_new(INITIAL_ENV_SIZE);
+    gc = gc_new(env);
+    init_env(env);
 
-        print(res);
-        printf(<span class="Constant">&quot;</span><span class="Special">\n</span><span class="Constant">&quot;</span>);
-
+    <span class="Comment">/*</span><span class="Comment"> Command line arguments were provided </span><span class="Comment">*/</span>
+    <span class="Statement">if</span> (argc &gt; <span class="Constant">1</span>) {
+        <span class="Type">char</span>* filename = argv[<span class="Constant">1</span>];
+        <span class="Type">FILE</span> *fp = fopen(filename, <span class="Constant">&quot;r&quot;</span>);
+        <span class="Type">char</span>* str = read_string(fp);
+        exec(env, str);
+        free(str);
+    } <span class="Statement">else</span> {
+        repl(env);
     }
 
     gc_free(gc);
     map_free(env);
-
-}
-
-<span class="Type">int</span> main(<span class="Type">void</span>) {
-
-    repl();
 
     <span class="Statement">return</span> <span class="Constant">0</span>;
 }

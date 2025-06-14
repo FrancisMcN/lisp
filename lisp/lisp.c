@@ -4,6 +4,8 @@
 
 #define BUFF_SIZE 256
 #define MAX_FUNC_ARGS 64
+#define INITIAL_ENV_SIZE 8
+#define GC_INTERVAL 100
 
 /**
  * Converts a string to an integer
@@ -77,12 +79,13 @@ static void map_free(Map* map);
  */
 typedef struct GC {
     Object* tail;
-
+    size_t objects_since_last_collection;
     Map* env;
 } GC;
 
 static GC* gc_new(Map* env) {
     GC* gc = malloc(sizeof(GC));
+    gc->objects_since_last_collection = 0;
     gc->env = env;
     return gc;
 }
@@ -145,6 +148,8 @@ static void gc_sweep(GC* gc) {
 
     }
 
+    gc->objects_since_last_collection = 0;
+
     printf("freed %zu objects.\n", count);
 
 }
@@ -174,6 +179,7 @@ static Object* object_new() {
         obj->prev = gc->tail;
         gc->tail = obj;
     }
+    gc->objects_since_last_collection++;
 
     return obj;
 }
@@ -275,12 +281,17 @@ static void object_free(Object* obj) {
  * Initialises a new map
  * @return - returns a new, empty map
  */
-static Map* map_new() {
-    unsigned long initial_size = 8;
+static Map* map_new(size_t size) {
+
+    int i;
     Map* map = (Map*)malloc(sizeof(Map));
     map->used = 0;
-    map->size = initial_size;
-    map->data = malloc(sizeof(MapEntry) * initial_size);
+    map->size = size;
+    map->data = malloc(sizeof(MapEntry) * size);
+//    for (i = 0; i < map->size; i++) {
+//        map->data[i].key = NULL;
+//        map->data[].value = NULL;
+//    }
     return map;
 }
 
@@ -299,33 +310,24 @@ static size_t hash(char* key) {
     return hash;
 }
 
-/**
- * Re-sizes a map / hash table, each time doubling the size of the table. The
- * table is doubled in size because resizing is an expensive operation, doubling each
- * time means the resize operation becomes less and less frequent as the table grows.
- * @param map - the map to resize
- */
 static void map_resize(Map* map) {
-    int i;
-    /* Increase map size */
-    map->size = map->size * 2;
-    /* Allocate empty block of data */
-    MapEntry* new_data = malloc(sizeof(MapEntry) * map->size);
-
-    /* Re-hash all the existing data */
-    MapEntry* old_data = map->data;
-    map->data = new_data;
-    size_t used = map->used;
-    for (i = 0; i < map->used; i++) {
-        if (old_data[i].key != NULL) {
-            map_put(map, old_data[i].key, old_data[i].value);
+    
+    size_t existing_map_size = map->size;
+    size_t new_map_size = existing_map_size * 2;
+    size_t i;
+    
+    Map* new_map = map_new(new_map_size);
+    for (i = 0; i < map->size; i++) {
+        if (map->data[i].key != NULL) {
+            map_put(new_map, map->data[i].key, map->data[i].value);
         }
     }
-    map->used = used;
-
-    /* Free old block of memory */
-    free(old_data);
-
+    
+    free(map->data);
+    map->size = new_map->size;
+    map->data = new_map->data;
+    map->used = new_map->used;
+    
 }
 
 /**
@@ -372,7 +374,7 @@ static void map_put(Map* map, char* key, Object* obj) {
         map->data[key_hash].key = map_key;
         map->data[key_hash].value = obj;
     }
-
+    
     map->used++;
 
 }
@@ -395,7 +397,7 @@ static Object* map_get(Map* map, char* key) {
 
         /* Found a collision, iterate over the rest of the table to find the map entry if it exists */
         while (map->data[key_hash].key != NULL) {
-
+            char* x = map->data[key_hash].key;
             /* Found the object after the collision, return the object */
             if (strcmp(map->data[key_hash].key, key) == 0) {
                 /* Found the item, return the object */
@@ -442,52 +444,56 @@ static Object* cdr(Object* obj) {
     return NULL;
 }
 
-static void print(Object* obj) {
+static void fprint(FILE* fp, Object* obj) {
 
     if (obj == NULL) {
-        printf("nil");
+        fprintf(fp, "nil");
         return;
     }
 
     switch (obj->type) {
         case NUMBER: {
-            printf("%d", obj->num);
+            fprintf(fp, "%d", obj->num);
             break;
         }
         case STRING:
         case SYMBOL: {
-            printf("%s", obj->str);
+            fprintf(fp, "%s", obj->str);
             break;
         }
         case CONS: {
-            putchar('(');
+            putc('(', fp);
             Object* temp = obj;
             while (temp != NULL) {
                 if (temp->type == CONS) {
-                    print(car(temp));
+                    fprint(fp, car(temp));
                 } else {
-                    print(temp);
+                    fprint(fp, temp);
                 }
                 if (cdr(temp) != NULL) {
-                    putchar(' ');
+                    putc(' ', fp);
                     if (cdr(temp)->type != CONS) {
-                        putchar('.');
-                        putchar(' ');
+                        putc('.', fp);
+                        putc(' ', fp);
                     }
                 }
                 temp = cdr(temp);
             }
-            putchar(')');
+            putc(')', fp);
             break;
         }
         case FUNCTION: {
-            printf("%p", obj->fn);
+            fprintf(fp, "%p", obj->fn);
             break;
         }
         case NIL: {
             break;
         }
     }
+}
+
+static void print(Object* obj) {
+    fprint(stdout, obj);
 }
 
 /**
@@ -594,17 +600,24 @@ static char peek(char** str, char buff[]) {
 
     while (c != 0) {
 
-        consumed++;
         c = *(temp++);
 
         if (c == '(') {
+            consumed++;
             *buff = '(';
             break;
         }
 
         if (c == ')') {
+            consumed++;
             *buff = ')';
             break;
+        }
+
+        /* Ignore whitespace and newlines */
+        if (c == ' ' || c == '\n') {
+            consumed++;
+            continue;
         }
 
         if (is_number(c)) {
@@ -624,6 +637,16 @@ static char peek(char** str, char buff[]) {
                 consumed++;
                 *(buff++) = c;
                 c = *(temp++);
+            }
+            consumed++;
+            break;
+        }
+
+        /* Everything after ; is part of a comment until the next newline */
+        if (c == ';') {
+            while (c != '\n') {
+                c = *(temp++);
+                consumed++;
             }
             break;
         }
@@ -768,6 +791,13 @@ static Object* eval_function_call(Map* env, Object* obj) {
     Object* function = eval(env, car(obj));
     Object* args[MAX_FUNC_ARGS] = {0};
 
+    if (function == NULL) {
+        fprintf(stderr, "function '");
+        fprint(stderr, car(obj));
+        fprintf(stderr, "' is undefined.\n");
+        return NULL;
+    }
+
     Object* temp = obj;
     i = 0;
     while (car(temp) != NULL) {
@@ -827,6 +857,10 @@ static Object* list(char** str) {
     prev->cons.cdr = NULL;
 
     next(str, buff);
+    if (strcmp(buff, ")") != 0) {
+        fprintf(stderr, "syntax error: missing expected ')'\n");
+        return NULL;
+    }
     return obj;
 }
 
@@ -935,6 +969,12 @@ Object* builtin_cons(Object* args[]) {
     return cons_new(args[0], args[1]);
 }
 
+Object* builtin_print(Object* args[]) {
+    print(args[0]);
+    printf("\n");
+    return NULL;
+}
+
 Object* builtin_mark(Object* args[]) {
     gc_mark(gc);
     return NULL;
@@ -965,52 +1005,101 @@ static void init_env(Map* env) {
     map_put(env, "cdr", function_new(builtin_cdr));
     map_put(env, "type", function_new(builtin_type));
     map_put(env, "cons", function_new(builtin_cons));
+    map_put(env, "print", function_new(builtin_print));
 
     map_put(env, "gc-mark", function_new(builtin_mark));
     map_put(env, "gc-sweep", function_new(builtin_sweep));
 
     map_put(env, "+", function_new(builtin_plus));
 
+}
+
+/**
+ * Reads text data from a file pointer where the data is of arbitrary length.
+ * @param fp - the file pointer to read the data from
+ * @return - a malloc'd string of characters of arbitrary length
+ */
+static char* read_string(FILE* fp) {
+
+    size_t p = 0;
+    size_t buff_size = BUFF_SIZE;
+    // char* buff = malloc(buff_size * sizeof(char));
+    char* buff = malloc(buff_size * sizeof(char));
+
+    while (!feof(fp) && !ferror(fp)) {
+
+        char temp[BUFF_SIZE] = {0};
+        if (fgets(temp, BUFF_SIZE, fp) != NULL) {
+            memcpy(buff + p, temp, strlen(temp));
+            p += strlen(temp);
+            /* if next line will overfill the buffer, allocate extra space */
+            if (p + BUFF_SIZE > buff_size ) {
+                buff = realloc(buff, buff_size * sizeof(char));
+            }
+        }
+    }
+
+    return buff;
+}
+
+static void exec(Map* env, char* str) {
+    Object* obj;
+    Object* res;
+
+    while (strlen(str) > 0) {
+        
+        obj = parse(&str);
+        
+        res = eval(env, obj);
+        /* Suppress nil in the REPL output */
+        if (res != NULL) {
+            print(res);
+            printf("\n");
+        }
+
+        if (gc->objects_since_last_collection >= GC_INTERVAL) {
+            gc_mark(gc);
+            gc_sweep(gc);
+        }
+
+    }
 
 }
 
 /**
  * Provides a Read-Eval-Print-Loop to the Lisp interpreter.
  */
-static void repl() {
-    Object* obj;
-    Object* res;
-    char buff[BUFF_SIZE] = {0};
+static void repl(Map* env) {
 
-    Map* env = map_new();
-    gc = gc_new(env);
-    init_env(env);
+    char buff[BUFF_SIZE] = {0};
 
     while (strcmp(buff, "(exit)") != 0) {
         printf("> ");
         read_stdin(buff);
+        exec(env, buff);
+    }
 
-        if (buff[0] == '\n') {
-            continue;
-        }
+}
 
-        obj = read(buff);
+int main(int argc, char *argv[]) {
 
-        res = eval(env, obj);
+    Map* env = map_new(INITIAL_ENV_SIZE);
+    gc = gc_new(env);
+    init_env(env);
 
-        print(res);
-        printf("\n");
-
+    /* Command line arguments were provided */
+    if (argc > 1) {
+        char* filename = argv[1];
+        FILE *fp = fopen(filename, "r");
+        char* str = read_string(fp);
+        exec(env, str);
+        free(str);
+    } else {
+        repl(env);
     }
 
     gc_free(gc);
     map_free(env);
-
-}
-
-int main(void) {
-
-    repl();
 
     return 0;
 }
