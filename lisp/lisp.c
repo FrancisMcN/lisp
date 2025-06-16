@@ -39,7 +39,7 @@ typedef struct Object {
     };
 } Object;
 
-static Object* object_new();
+static Object* object_new(void);
 static void object_free(Object* obj);
 static Object* number_new(int num);
 static Object* symbol_new(char* symbol);
@@ -68,7 +68,7 @@ typedef struct {
 } Map;
 
 /* Pre-declaring some map / hash table function signatures */
-static Map* map_new();
+static Map* map_new(size_t size);
 static void map_put(Map* map, char* key, Object* obj);
 static Object* map_get(Map* map, char* key);
 static void map_resize(Map* map);
@@ -125,12 +125,28 @@ static void gc_sweep(GC* gc) {
         if (!ptr->marked) {
 
             if (ptr->prev != NULL) {
-                /* Remove object from middle or end of linked list */
+                
+                /* Remove object from middle or end of linked list,
+                 * change the pointer in previous object to skip the object
+                 * being removed. Set ptr->prev->next = ptr->next.
+                 *
+                 * Also, set the prev pointer in the next object to skip
+                 * the object being removed. Set ptr->next->prev = ptr->prev.
+                 *
+                 * Now, the object has been removed from the linked list and
+                 * can be safely free'd.
+                 */
                 ptr->prev->next = ptr->next;
+                if (ptr->next != NULL) {
+                    ptr->next->prev = ptr->prev;
+                }
+                
                 /* The tail pointer also has to be updated if we free'd the last object in the list */
                 if (ptr == gc->tail) {
                     gc->tail = gc->tail->prev;
                 }
+                
+                
             } else {
                 /* Remove object from start of linked list */
                 gc->tail = ptr->next;
