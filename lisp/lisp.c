@@ -5,6 +5,7 @@
 #define BUFF_SIZE 256
 #define MAX_FUNC_ARGS 64
 #define INITIAL_ENV_SIZE 8
+#define MAX_ENV_COUNT 1024
 #define GC_INTERVAL 100
 
 /**
@@ -19,6 +20,23 @@ static int str_to_int(char* str) {
 /* The native object types used by the interpreter */
 typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, BOOL, NIL} Type;
 
+/* The Cons cell structure used in the interpreter */
+typedef struct Cons {
+    struct Object* car;
+    struct Object* cdr;
+} Cons;
+
+/**
+ * A function is wrapped in this Function struct, user defined functions
+ * have to be manually interpreted each time, making them less efficient.
+ * Built-in functions are just a pointer to a C function. */
+typedef struct Function {
+    char is_user_defined;
+    struct Object* args;
+    struct Object* body;
+    struct Object* (*fn)(struct Object** args);
+} Function;
+
 /**
  * All data used by the interpreter is an 'Object', represented
  * using the Object struct below.
@@ -31,15 +49,13 @@ typedef struct Object {
     union {
         int num;
         char* str;
-        struct Cons {
-            struct Object* car;
-            struct Object* cdr;
-        } cons;
-        struct Object* (*fn)(struct Object** args);
+        Cons cons;
+        Function fn;
     };
 } Object;
 
 static Object* object_new(void);
+static void object_mark(Object* obj);
 static void object_free(Object* obj);
 static Object* number_new(int num);
 static Object* symbol_new(char* symbol);
@@ -75,38 +91,57 @@ static Object* map_get(Map* map, char* key);
 static void map_resize(Map* map);
 static void map_free(Map* map);
 
+static Object* car(Object* obj);
+static Object* cdr(Object* obj);
+
 /**
  * GC is used to implement a mark and sweep garbage collector
  */
 typedef struct GC {
     Object* tail;
     size_t objects_since_last_collection;
-    Map* env;
+    Map* env_stack[MAX_ENV_COUNT];
+    size_t tos;
 } GC;
 
 static GC* gc_new(Map* env) {
+    size_t i;
+    
     GC* gc = malloc(sizeof(GC));
     gc->objects_since_last_collection = 0;
-    gc->env = env;
+    for (i = 0; i < MAX_ENV_COUNT; i++) {
+        gc->env_stack[i] = NULL;
+    }
+    gc->tos = 0;
+    gc->env_stack[0] = env;
     return gc;
 }
 
 static void gc_mark(GC* gc) {
 
     size_t i;
+    size_t j;
     size_t count = 0;
     size_t total = 0;
-    /* Mark all objects stored in the environment map */
-    MapEntry* entries = gc->env->data;
-    for (i = 0; i < gc->env->size; i++) {
-        if (entries[i].key != NULL && entries[i].value != NULL) {
-            entries[i].value->marked = 1;
-            count++;
+    for (i = 0; i < MAX_ENV_COUNT; i++) {
+        
+        if (gc->env_stack[i] != NULL) {
+            /* Mark all objects stored in the environment map */
+            MapEntry* entries = gc->env_stack[i]->data;
+            for (j = 0; j < gc->env_stack[i]->size; j++) {
+                MapEntry entry = entries[j];
+                if (entry.key != NULL) {
+                    object_mark(entry.value);
+                }
+            }
         }
     }
 
     Object* temp = gc->tail;
     while (temp != NULL) {
+        if (temp->marked) {
+            count++;
+        }
         total++;
         temp = temp->prev;
     }
@@ -202,6 +237,31 @@ static Object* object_new(void) {
 }
 
 /**
+ * Recursively mark objects to prevent accidentally freeing them
+ */
+static void object_mark(Object* obj) {
+    
+    if (obj != NULL) {
+        obj->marked = 1;
+        switch (obj->type) {
+            case FUNCTION: {
+                if (obj->fn.is_user_defined) {
+                    object_mark(obj->fn.args);
+                    object_mark(obj->fn.body);
+                }
+            }
+            case CONS: {
+                object_mark(car(obj));
+                object_mark(cdr(obj));
+            }
+            default: {
+                
+            }
+        }
+    }
+}
+
+/**
  * Allocates a new number object on the heap
  * @param num - the number to store in the number object
  * @return - a reference to the number object
@@ -254,10 +314,27 @@ static Object* cons_new(Object* car, Object* cdr) {
     return obj;
 }
 
+static Object* user_defined_function_new(Object* args, Object* body) {
+    Object* obj = object_new();
+    obj->type = FUNCTION;
+    obj->fn = (Function){
+        1,
+        args,
+        body,
+        NULL,
+    };
+    return obj;
+}
+
 static Object* function_new(struct Object* (*fn)(struct Object** args)) {
     Object* obj = object_new();
     obj->type = FUNCTION;
-    obj->fn = fn;
+    obj->fn = (Function){
+        0,
+        0,
+        NULL,
+        fn
+    };
     return obj;
 }
 
@@ -272,6 +349,12 @@ static Object* bool_new(char value) {
     return obj;
 }
 
+/**
+ * Actually calls free to deallocate objects, we don't need to deallocate CONS or FUNCTION
+ * sub-components directly because the CONS cells and their contents are all stored in the linked list
+ * individually. Freeing CONS or FUNCTION sub-components here will cause double free's.
+ * @param obj - the object to free
+ */
 static void object_free(Object* obj) {
 
     if (obj == NULL) {
@@ -283,6 +366,7 @@ static void object_free(Object* obj) {
             break;
         }
         case STRING: {
+            free(obj->str);
             break;
         }
         case SYMBOL: {
@@ -507,7 +591,7 @@ static void fprint(FILE* fp, Object* obj) {
             break;
         }
         case FUNCTION: {
-            fprintf(fp, "%p", obj->fn);
+            fprintf(fp, "%p", &obj->fn);
             break;
         }
         case BOOL: {
@@ -760,6 +844,8 @@ static char is_special_form(Object* cons) {
         if (strcmp(sym, "quote") == 0 ||
             strcmp(sym, "eval") == 0 ||
             strcmp(sym, "define") == 0 ||
+            strcmp(sym, "lambda") == 0 ||
+            strcmp(sym, "do") == 0 ||
             strcmp(sym, "if") == 0) {
             return 1;
             }
@@ -795,6 +881,54 @@ static Object* eval_if_special_form(Map* env, Object* obj) {
     return eval(env, else_branch);
 }
 
+Object* function_wrapper(Object* function, Object* args[]) {
+    
+    /* Create new environment and push onto environment stack */
+    gc->env_stack[++gc->tos] = map_new(INITIAL_ENV_SIZE);
+    Map* local_env = gc->env_stack[gc->tos];
+    
+    Object* temp = function->fn.args;
+    
+    /* Store function arguments inside local environment */
+    size_t i = 0;
+    while (car(temp) != NULL) {
+        Object* name = car(temp);
+        map_put(local_env, name->str, args[i]);
+        temp = cdr(temp);
+        i++;
+    }
+    
+    Object* res = eval(gc->env_stack[gc->tos], function->fn.body);
+    
+    /* Cleanup local environment after function has finished executing */
+    map_free(local_env);
+    gc->env_stack[gc->tos] = NULL;
+    gc->tos--;
+    
+    return res;
+}
+
+
+static Object* eval_lambda_special_form(Map* env, Object* obj) {
+    
+    Object* args = car(cdr(obj));
+    Object* body = car(cdr(cdr(obj)));
+    return user_defined_function_new(args, body);
+    
+}
+
+static Object* eval_do_special_form(Map* env, Object* obj) {
+    
+    Object* res = NULL;
+    Object* temp = obj;
+    while (car(temp) != NULL) {
+        res = eval(env, car(temp));
+        temp = cdr(temp);
+    }
+    return res;
+    
+}
+
 /**
  * Evaluates the special form, uses the environment to store side effects
  * @param env - the interpreter environment
@@ -811,6 +945,12 @@ static Object* eval_special_form(Map* env, Object* obj) {
     }
     if (strcmp(first->str, "define") == 0) {
         return eval_define_special_form(env, obj);
+    }
+    if (strcmp(first->str, "lambda") == 0) {
+        return eval_lambda_special_form(env, obj);
+    }
+    if (strcmp(first->str, "do") == 0) {
+        return eval_do_special_form(env, obj);
     }
     if (strcmp(first->str, "if") == 0) {
         return eval_if_special_form(env, obj);
@@ -843,8 +983,11 @@ static Object* eval_function_call(Map* env, Object* obj) {
         args[i++] = eval(env, car(temp));
 
     }
-
-    return function->fn(args);
+    
+    if (!function->fn.is_user_defined) {
+        return function->fn.fn(args);
+    }
+    return function_wrapper(function, args);
 }
 
 /**
@@ -952,7 +1095,11 @@ Object* eval(Map* env, Object* obj) {
     if (obj != NULL) {
         switch (obj->type) {
             case SYMBOL: {
-                res = map_get(env, obj->str);
+                size_t i = gc->tos;
+                while (res == NULL && (0 <= i && i <= MAX_ENV_COUNT)) {
+                    res = map_get(gc->env_stack[i], obj->str);
+                    i--;
+                }
                 break;
             }
             case CONS: {
@@ -1084,7 +1231,7 @@ Object* builtin_import(Object* args[]) {
     }
     
     char* str = read_string(fp);
-    exec(gc->env, str);
+    exec(gc->env_stack[gc->tos], str);
     free(str);
     return NULL;
 }
