@@ -9,7 +9,7 @@
 
 /**
  * Converts a string to an integer
- * @param str
+ * @param str - the string to convert to an integer
  * @return - the parsed integer
  */
 static int str_to_int(char* str) {
@@ -17,7 +17,7 @@ static int str_to_int(char* str) {
 }
 
 /* The native object types used by the interpreter */
-typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, NIL} Type;
+typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, BOOL, NIL} Type;
 
 /**
  * All data used by the interpreter is an 'Object', represented
@@ -45,6 +45,7 @@ static Object* number_new(int num);
 static Object* symbol_new(char* symbol);
 static Object* string_new(char* str);
 static Object* function_new(struct Object* (*fn)(struct Object** args));
+static Object* bool_new(char value);
 
 static void print(Object* obj);
 
@@ -98,7 +99,7 @@ static void gc_mark(GC* gc) {
     /* Mark all objects stored in the environment map */
     MapEntry* entries = gc->env->data;
     for (i = 0; i < gc->env->size; i++) {
-        if (entries[i].key != NULL) {
+        if (entries[i].key != NULL && entries[i].value != NULL) {
             entries[i].value->marked = 1;
             count++;
         }
@@ -182,7 +183,7 @@ static GC* gc;
  * Creates a new Object using malloc, don't forget to free!
  * @return - returns a pointer to the heap containing the newly created object
  */
-static Object* object_new() {
+static Object* object_new(void) {
     Object* obj = (Object*)malloc(sizeof(Object));
     obj->next = NULL;
     obj->prev = NULL;
@@ -202,7 +203,7 @@ static Object* object_new() {
 
 /**
  * Allocates a new number object on the heap
- * @param num
+ * @param num - the number to store in the number object
  * @return - a reference to the number object
  */
 static Object* number_new(int num) {
@@ -214,7 +215,7 @@ static Object* number_new(int num) {
 
 /**
  * Allocates a new symbol object on the heap
- * @param symbol
+ * @param symbol - a string to store in the symbol object
  * @return - a reference to the symbol object
  */
 static Object* symbol_new(char* symbol) {
@@ -241,9 +242,9 @@ static Object* string_new(char* str) {
 
 /**
  * Allocates a new cons object on the heap
- * @param car
- * @param cdr
- * @return
+ * @param car - the first element of the cons cell
+ * @param cdr - the second element of the cons cell
+ * @return - the newly created cons cell
  */
 static Object* cons_new(Object* car, Object* cdr) {
     Object* obj = object_new();
@@ -257,6 +258,17 @@ static Object* function_new(struct Object* (*fn)(struct Object** args)) {
     Object* obj = object_new();
     obj->type = FUNCTION;
     obj->fn = fn;
+    return obj;
+}
+
+static Object* bool_new(char value) {
+    Object* obj = object_new();
+    obj->type = BOOL;
+    if (value) {
+        obj->num = 1;
+    } else {
+        obj->num = 0;
+    }
     return obj;
 }
 
@@ -283,6 +295,9 @@ static void object_free(Object* obj) {
         case FUNCTION: {
             break;
         }
+        case BOOL: {
+            break;
+        }
         case NIL: {
             break;
         }
@@ -298,16 +313,10 @@ static void object_free(Object* obj) {
  * @return - returns a new, empty map
  */
 static Map* map_new(size_t size) {
-
-    int i;
     Map* map = (Map*)malloc(sizeof(Map));
     map->used = 0;
     map->size = size;
     map->data = malloc(sizeof(MapEntry) * size);
-//    for (i = 0; i < map->size; i++) {
-//        map->data[i].key = NULL;
-//        map->data[].value = NULL;
-//    }
     return map;
 }
 
@@ -413,7 +422,6 @@ static Object* map_get(Map* map, char* key) {
 
         /* Found a collision, iterate over the rest of the table to find the map entry if it exists */
         while (map->data[key_hash].key != NULL) {
-            char* x = map->data[key_hash].key;
             /* Found the object after the collision, return the object */
             if (strcmp(map->data[key_hash].key, key) == 0) {
                 /* Found the item, return the object */
@@ -502,6 +510,14 @@ static void fprint(FILE* fp, Object* obj) {
             fprintf(fp, "%p", obj->fn);
             break;
         }
+        case BOOL: {
+            if (obj->num) {
+                fprintf(fp, "true");
+            } else {
+                fprintf(fp, "false");
+            }
+            break;
+        }
         case NIL: {
             break;
         }
@@ -538,7 +554,7 @@ static Object* atom(char** str);
  * Clears the buffer so it can be re-used. Ideally buffers are
  * allocated on the stack, re-used and cleared for re-use by this
  * function.
- * @param buff
+ * @param buff - the buffer of characters to clear
  */
 static void clear_buff(char buff[]) {
     int i;
@@ -549,7 +565,7 @@ static void clear_buff(char buff[]) {
 
 /**
  * Determines whether the provided character c is numeric
- * @param c
+ * @param c - the character to test
  * @return true or false
  */
 static char is_number(char c) {
@@ -573,7 +589,7 @@ static char is_printable(char c) {
 
 /**
  * Currently almost any character is a valid symbol
- * @param c
+ * @param c - the character to test
  * @return true or false
  */
 static char is_symbol(char c) {
@@ -721,9 +737,9 @@ static char is_expr(char buff[]) {
 /**
  * Tests the type of an object, just a helper method to
  * reduce some duplicated code.
- * @param object
- * @param obj_type
- * @return
+ * @param object - the object to test
+ * @param obj_type - the type to compare against
+ * @return - returns true if the object is of type 'obj_type'
  */
 static char is_type(Object* object, Type obj_type) {
     if (object != NULL) {
@@ -752,7 +768,6 @@ static char is_special_form(Object* cons) {
 }
 
 static Object* eval_eval_special_form(Map* env, Object* obj) {
-
     return eval(env, eval(env, car(cdr(obj))));
 }
 
@@ -768,16 +783,23 @@ static Object* eval_define_special_form(Map* env, Object* obj) {
 }
 
 static Object* eval_if_special_form(Map* env, Object* obj) {
-    Object* first = car(obj);
-    printf("found if special form\n");
-    return NULL;
+    Object* cond = car(cdr(obj));
+    Object* true_branch = car(cdr(cdr(obj)));
+    Object* else_branch = car(cdr(cdr(cdr(obj))));
+    
+    Object* result = eval(env, cond);
+    if (result->num) {
+        return eval(env, true_branch);
+    }
+    
+    return eval(env, else_branch);
 }
 
 /**
  * Evaluates the special form, uses the environment to store side effects
- * @param env
- * @param obj
- * @return
+ * @param env - the interpreter environment
+ * @param obj - an object representing the special form to be evaluated
+ * @return - the result of evaluating the special form
  */
 static Object* eval_special_form(Map* env, Object* obj) {
     Object* first = car(obj);
@@ -798,9 +820,9 @@ static Object* eval_special_form(Map* env, Object* obj) {
 
 /**
  * Evaluates a cons cell representing a function call
- * @param env
- * @param obj
- * @return
+ * @param env - the interpreter environment
+ * @param obj - the object representing a function call
+ * @return - the result of evaluating the function
  */
 static Object* eval_function_call(Map* env, Object* obj) {
     int i;
@@ -828,9 +850,9 @@ static Object* eval_function_call(Map* env, Object* obj) {
 /**
  * Evaluates a cons cell. In common with many lisps it first checks if it's a special form
  * and if not then assumes it's a function call.
- * @param env
- * @param obj
- * @return
+ * @param env - the interpreter environment
+ * @param obj - an object representing the list to be evaluated
+ * @return - the result of evaluating the list
  */
 static Object* eval_list(Map* env, Object* obj) {
 
@@ -946,89 +968,6 @@ Object* eval(Map* env, Object* obj) {
     return res;
 }
 
-/*
- * End of scanning and parsing functions
- */
-
-Object* builtin_car(Object* args[]) {
-    return car(args[0]);
-}
-
-Object* builtin_cdr(Object* args[]) {
-    return cdr(args[0]);
-}
-
-Object* builtin_type(Object* args[]) {
-    Object* obj = args[0];
-    if (obj == NULL) {
-        return string_new("\"nil");
-    }
-    switch (obj->type) {
-        case NUMBER:
-            return string_new("\"number");
-        case SYMBOL:
-            return string_new("\"symbol");
-        case STRING:
-            return string_new("\"string");
-        case FUNCTION:
-            return string_new("\"function");
-        case CONS:
-            return string_new("\"cons");
-        case NIL:
-            return string_new("\"nil");
-        default:
-            return string_new("\"unknown");
-    }
-}
-
-Object* builtin_cons(Object* args[]) {
-    return cons_new(args[0], args[1]);
-}
-
-Object* builtin_print(Object* args[]) {
-    print(args[0]);
-    printf("\n");
-    return NULL;
-}
-
-Object* builtin_mark(Object* args[]) {
-    gc_mark(gc);
-    return NULL;
-}
-
-Object* builtin_sweep(Object* args[]) {
-    gc_sweep(gc);
-    return NULL;
-}
-
-Object* builtin_plus(Object* args[]) {
-
-    int temp = 0;
-    int i = 0;
-
-    while (args[i] != NULL) {
-        Object* arg = args[i];
-        temp += arg->num;
-        i++;
-    }
-
-    return number_new(temp);
-}
-
-static void init_env(Map* env) {
-
-    map_put(env, "car", function_new(builtin_car));
-    map_put(env, "cdr", function_new(builtin_cdr));
-    map_put(env, "type", function_new(builtin_type));
-    map_put(env, "cons", function_new(builtin_cons));
-    map_put(env, "print", function_new(builtin_print));
-
-    map_put(env, "gc-mark", function_new(builtin_mark));
-    map_put(env, "gc-sweep", function_new(builtin_sweep));
-
-    map_put(env, "+", function_new(builtin_plus));
-
-}
 
 /**
  * Reads text data from a file pointer where the data is of arbitrary length.
@@ -1042,7 +981,7 @@ static char* read_string(FILE* fp) {
     // char* buff = malloc(buff_size * sizeof(char));
     char* buff = malloc(buff_size * sizeof(char));
 
-    while (!feof(fp) && !ferror(fp)) {
+    while (fp != NULL && !feof(fp) && !ferror(fp)) {
 
         char temp[BUFF_SIZE] = {0};
         if (fgets(temp, BUFF_SIZE, fp) != NULL) {
@@ -1079,6 +1018,152 @@ static void exec(Map* env, char* str) {
         }
 
     }
+
+}
+
+/*
+ * End of scanning and parsing functions
+ */
+
+Object* builtin_car(Object* args[]) {
+    return car(args[0]);
+}
+
+Object* builtin_cdr(Object* args[]) {
+    return cdr(args[0]);
+}
+
+Object* builtin_type(Object* args[]) {
+    Object* obj = args[0];
+    if (obj == NULL) {
+        return string_new("\"nil");
+    }
+    switch (obj->type) {
+        case NUMBER:
+            return string_new("\"number");
+        case SYMBOL:
+            return string_new("\"symbol");
+        case STRING:
+            return string_new("\"string");
+        case FUNCTION:
+            return string_new("\"function");
+        case CONS:
+            return string_new("\"cons");
+        case BOOL:
+            return string_new("\"bool");
+        case NIL:
+            return string_new("\"nil");
+        default:
+            return string_new("\"unknown");
+    }
+}
+
+Object* builtin_cons(Object* args[]) {
+    return cons_new(args[0], args[1]);
+}
+
+Object* builtin_print(Object* args[]) {
+    print(args[0]);
+    printf("\n");
+    return NULL;
+}
+
+Object* builtin_import(Object* args[]) {
+    Object* import_path = args[0];
+    if (import_path == NULL || import_path->type != STRING) {
+        fprintf(stderr, "import requires 1 parameter which must be a string.\n");
+        return NULL;
+    }
+    
+    /* Read file and evaluate each line */
+    char* filename = import_path->str;
+    FILE *fp = fopen(filename, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "import error: '%s' file not found\n", filename);
+        return NULL;
+    }
+    
+    char* str = read_string(fp);
+    exec(gc->env, str);
+    free(str);
+    return NULL;
+}
+
+Object* builtin_mark(Object* args[]) {
+    gc_mark(gc);
+    return NULL;
+}
+
+Object* builtin_sweep(Object* args[]) {
+    gc_sweep(gc);
+    return NULL;
+}
+
+Object* builtin_equal(Object* args[]) {
+
+    Object* a = args[0];
+    Object* b = args[1];
+    
+    if (a->type == b->type) {
+        switch (a->type) {
+            case NUMBER:
+                return bool_new(a->num == b->num);
+            default:
+                return bool_new(a == b);
+        }
+    }
+    
+    return bool_new(0);
+    
+}
+
+Object* builtin_plus(Object* args[]) {
+
+    int temp = 0;
+    int i = 0;
+
+    while (args[i] != NULL) {
+        Object* arg = args[i];
+        temp += arg->num;
+        i++;
+    }
+
+    return number_new(temp);
+}
+
+Object* builtin_minus(Object* args[]) {
+
+    int temp = 0;
+    int i = 0;
+
+    while (args[i] != NULL) {
+        Object* arg = args[i];
+        temp -= arg->num;
+        i++;
+    }
+
+    return number_new(temp);
+}
+
+static void init_env(Map* env) {
+    
+    map_put(env, "nil", NULL);
+    map_put(env, "true", bool_new(1));
+    map_put(env, "false", bool_new(0));
+
+    map_put(env, "car", function_new(builtin_car));
+    map_put(env, "cdr", function_new(builtin_cdr));
+    map_put(env, "type", function_new(builtin_type));
+    map_put(env, "cons", function_new(builtin_cons));
+    map_put(env, "print", function_new(builtin_print));
+    map_put(env, "import", function_new(builtin_import));
+
+    map_put(env, "gc-mark", function_new(builtin_mark));
+    map_put(env, "gc-sweep", function_new(builtin_sweep));
+
+    map_put(env, "=", function_new(builtin_equal));
+    map_put(env, "+", function_new(builtin_plus));
+    map_put(env, "-", function_new(builtin_minus));
 
 }
 
