@@ -76,3 +76,24 @@ The interpreter can also execute multiple Lisp expressions in sequence and it ca
 6
 12
 ```
+
+The `do` special form is now supported, it's useful for when you want to include multiple expressions inside a single form such as a lambda special form or an if special form.
+```lisp
+> (define hello-world (lambda (a b c) (do (print a) (print b) (print c))))
+> (hello-world 1 2 3)
+1
+2
+3
+```
+
+User-defined functions are now supported using the built-in `lambda` special form. You can either assign the function to a symbol or you can call it directly.
+```lisp
+> ((lambda (name) (print name)) "francis")
+francis
+```
+Below is an example showing how to assign a name to a function.
+```lisp
+> (define double (lambda (a) (+ a a)))
+> (double 10)
+20
+```
