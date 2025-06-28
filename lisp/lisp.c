@@ -18,7 +18,7 @@ static int str_to_int(char* str) {
 }
 
 /* The native object types used by the interpreter */
-typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, BOOL, NIL} Type;
+typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, MACRO, BOOL, NIL} Type;
 
 /* The Cons cell structure used in the interpreter */
 typedef struct Cons {
@@ -32,6 +32,7 @@ typedef struct Cons {
  * Built-in functions are just a pointer to a C function. */
 typedef struct Function {
     char is_user_defined;
+    char is_macro;
     struct Object* args;
     struct Object* body;
     struct Object* (*fn)(struct Object** args);
@@ -244,15 +245,18 @@ static void object_mark(Object* obj) {
     if (obj != NULL) {
         obj->marked = 1;
         switch (obj->type) {
-            case FUNCTION: {
+            case FUNCTION:
+            case MACRO: {
                 if (obj->fn.is_user_defined) {
                     object_mark(obj->fn.args);
                     object_mark(obj->fn.body);
                 }
+                break;
             }
             case CONS: {
                 object_mark(car(obj));
                 object_mark(cdr(obj));
+                break;
             }
             default: {
                 
@@ -319,6 +323,20 @@ static Object* user_defined_function_new(Object* args, Object* body) {
     obj->type = FUNCTION;
     obj->fn = (Function){
         1,
+        0,
+        args,
+        body,
+        NULL,
+    };
+    return obj;
+}
+
+static Object* user_defined_macro_new(Object* args, Object* body) {
+    Object* obj = object_new();
+    obj->type = MACRO;
+    obj->fn = (Function){
+        1,
+        1,
         args,
         body,
         NULL,
@@ -331,6 +349,20 @@ static Object* function_new(struct Object* (*fn)(struct Object** args)) {
     obj->type = FUNCTION;
     obj->fn = (Function){
         0,
+        0,
+        0,
+        NULL,
+        fn
+    };
+    return obj;
+}
+
+static Object* macro_new(struct Object* (*fn)(struct Object** args)) {
+    Object* obj = object_new();
+    obj->type = MACRO;
+    obj->fn = (Function){
+        0,
+        1,
         0,
         NULL,
         fn
@@ -377,6 +409,9 @@ static void object_free(Object* obj) {
             break;
         }
         case FUNCTION: {
+            break;
+        }
+        case MACRO: {
             break;
         }
         case BOOL: {
@@ -590,7 +625,8 @@ static void fprint(FILE* fp, Object* obj) {
             putc(')', fp);
             break;
         }
-        case FUNCTION: {
+        case FUNCTION:
+        case MACRO: {
             fprintf(fp, "%p", &obj->fn);
             break;
         }
@@ -845,6 +881,7 @@ static char is_special_form(Object* cons) {
             strcmp(sym, "eval") == 0 ||
             strcmp(sym, "define") == 0 ||
             strcmp(sym, "lambda") == 0 ||
+            strcmp(sym, "macro") == 0 ||
             strcmp(sym, "do") == 0 ||
             strcmp(sym, "if") == 0) {
             return 1;
@@ -917,6 +954,14 @@ static Object* eval_lambda_special_form(Map* env, Object* obj) {
     
 }
 
+static Object* eval_macro_special_form(Map* env, Object* obj) {
+    
+    Object* args = car(cdr(obj));
+    Object* body = car(cdr(cdr(obj)));
+    return user_defined_macro_new(args, body);
+    
+}
+
 static Object* eval_do_special_form(Map* env, Object* obj) {
     
     Object* res = NULL;
@@ -949,6 +994,9 @@ static Object* eval_special_form(Map* env, Object* obj) {
     if (strcmp(first->str, "lambda") == 0) {
         return eval_lambda_special_form(env, obj);
     }
+    if (strcmp(first->str, "macro") == 0) {
+        return eval_macro_special_form(env, obj);
+    }
     if (strcmp(first->str, "do") == 0) {
         return eval_do_special_form(env, obj);
     }
@@ -964,8 +1012,9 @@ static Object* eval_special_form(Map* env, Object* obj) {
  * @param obj - the object representing a function call
  * @return - the result of evaluating the function
  */
-static Object* eval_function_call(Map* env, Object* obj) {
+static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
     int i;
+    Object* result = NULL;
     Object* function = eval(env, car(obj));
     Object* args[MAX_FUNC_ARGS] = {0};
 
@@ -980,14 +1029,28 @@ static Object* eval_function_call(Map* env, Object* obj) {
     i = 0;
     while (car(temp) != NULL) {
         temp = cdr(temp);
-        args[i++] = eval(env, car(temp));
+        Object* arg;
+        /* Don't evaluate args if the function is a macro */
+        if (!function->fn.is_macro) {
+            arg = eval(env, car(temp));
+        } else {
+            arg = car(temp);
+        }
+        args[i++] = arg;
 
     }
     
     if (!function->fn.is_user_defined) {
-        return function->fn.fn(args);
+        result = function->fn.fn(args);
+    } else {
+        result = function_wrapper(function, args);
     }
-    return function_wrapper(function, args);
+    
+    if (expand_macro && function->fn.is_macro) {
+        result = eval(env, result);
+    }
+    
+    return result;
 }
 
 /**
@@ -1003,7 +1066,7 @@ static Object* eval_list(Map* env, Object* obj) {
         return eval_special_form(env, obj);
     }
 
-    return eval_function_call(env, obj);
+    return eval_function_call(env, obj, 1);
 }
 
 /**
@@ -1194,6 +1257,8 @@ Object* builtin_type(Object* args[]) {
             return string_new("\"string");
         case FUNCTION:
             return string_new("\"function");
+        case MACRO:
+            return string_new("\"macro");
         case CONS:
             return string_new("\"cons");
         case BOOL:
@@ -1234,6 +1299,49 @@ Object* builtin_import(Object* args[]) {
     exec(gc->env_stack[gc->tos], str);
     free(str);
     return NULL;
+}
+
+Object* builtin_list(Object* args[]) {
+    size_t i = 0;
+    Object* temp = cons_new(NULL, NULL);
+    Object* list = temp;
+    Object* prev = temp;
+    while (args[i] != NULL) {
+        temp->cons.car = args[i];
+        temp->cons.cdr = cons_new(NULL, NULL);
+        prev = temp;
+        temp = temp->cons.cdr;
+        i++;
+    }
+
+    /* Remove extra empty cons cell, we don't need to free
+     * the extra cons cell because we have garbage collection */
+    prev->cons.cdr = NULL;
+    return list;
+}
+
+/* func is macro that just combines 'define' and 'lambda' to
+ * create named functions */
+Object* builtin_func(Object* args[]) {
+    Object* name = args[0];
+    Object* fn_args = args[1];
+    Object* body = args[2];
+
+    return cons_new(symbol_new("define"), cons_new(name, cons_new(cons_new(symbol_new("lambda"), cons_new(fn_args, cons_new(body, NULL))), NULL)));
+}
+
+/* defmacro is itself a builtin macro, similar to the func macro */
+Object* builtin_defmacro(Object* args[]) {
+    Object* name = args[0];
+    Object* fn_args = args[1];
+    Object* body = args[2];
+
+    return cons_new(symbol_new("define"), cons_new(name, cons_new(cons_new(symbol_new("macro"), cons_new(fn_args, cons_new(body, NULL))), NULL)));
+}
+
+Object* builtin_macroexpand(Object* args[]) {
+    Object* macro = args[0];
+    return eval_function_call(gc->env_stack[gc->tos], macro, 0);
 }
 
 Object* builtin_mark(Object* args[]) {
@@ -1304,6 +1412,11 @@ static void init_env(Map* env) {
     map_put(env, "cons", function_new(builtin_cons));
     map_put(env, "print", function_new(builtin_print));
     map_put(env, "import", function_new(builtin_import));
+    map_put(env, "list", function_new(builtin_list));
+    
+    map_put(env, "func", macro_new(builtin_func));
+    map_put(env, "defmacro", macro_new(builtin_defmacro));
+    map_put(env, "macroexpand", function_new(builtin_macroexpand));
 
     map_put(env, "gc-mark", function_new(builtin_mark));
     map_put(env, "gc-sweep", function_new(builtin_sweep));
