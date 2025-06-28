@@ -730,8 +730,8 @@ static char peek(char** str, char buff[]) {
             break;
         }
 
-        /* Ignore whitespace and newlines */
-        if (c == ' ' || c == '\n') {
+        /* Ignore whitespace, tabs, returns and newlines */
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
             consumed++;
             continue;
         }
