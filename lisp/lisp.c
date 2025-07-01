@@ -148,7 +148,7 @@ static void gc_mark(GC* gc) {
         temp = temp->prev;
     }
 
-    printf("marked %zu objects out of %zu total objects.\n", count, total);
+    printf("marked %lu objects out of %lu total objects.\n", count, total);
 
 }
 
@@ -205,7 +205,7 @@ static void gc_sweep(GC* gc) {
 
     gc->objects_since_last_collection = 0;
 
-    printf("freed %zu objects.\n", count);
+    printf("freed %lu objects.\n", count);
 
 }
 
@@ -1242,7 +1242,7 @@ static char* read_string(FILE* fp) {
             buff[p] = 0;
             /* if next line will overfill the buffer, allocate extra space */
             if (p + BUFF_SIZE > buff_size ) {
-                buff = realloc(buff, buff_size * sizeof(char));
+                buff = realloc(buff, strlen(buff) + buff_size * sizeof(char));
             }
         }
     }
@@ -1281,7 +1281,11 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
     printf("=== testing (%s) ===\n", filename);
     
     test_no = 0;
+
+    printf("strlen: %lu\n", strlen(str));
     
+    printf("%s\n", str);
+
     while (strlen(str) > 0) {
         
         obj = parse(&str);
@@ -1563,7 +1567,6 @@ int main(int argc, char *argv[]) {
     Map* env = map_new(INITIAL_ENV_SIZE);
     gc = gc_new(env);
     init_env(env);
-    
 
     /* Command line arguments were provided */
     if (argc > 1) {
