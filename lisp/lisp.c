@@ -18,7 +18,7 @@ static int str_to_int(char* str) {
 }
 
 /* The native object types used by the interpreter */
-typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, MACRO, BOOL, NIL} Type;
+typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, MACRO, BOOL} Type;
 
 /* The Cons cell structure used in the interpreter */
 typedef struct Cons {
@@ -417,9 +417,6 @@ static void object_free(Object* obj) {
         case BOOL: {
             break;
         }
-        case NIL: {
-            break;
-        }
     }
 
     free(obj);
@@ -572,6 +569,7 @@ static void map_free(Map* map) {
 /* End of hash table implementation */
 
 Object* eval(Map* env, Object* obj);
+static void init_env(Map* env);
 
 static Object* car(Object* obj) {
     if (obj != NULL && obj->type == CONS) {
@@ -636,9 +634,6 @@ static void fprint(FILE* fp, Object* obj) {
             } else {
                 fprintf(fp, "false");
             }
-            break;
-        }
-        case NIL: {
             break;
         }
     }
@@ -905,13 +900,30 @@ static Object* eval_define_special_form(Map* env, Object* obj) {
     return NULL;
 }
 
+static char is_truthy(Object* obj) {
+    if (obj != NULL) {
+        switch (obj->type) {
+            case NUMBER:
+            case BOOL:
+                return obj->num > 0;
+            case SYMBOL:
+            case STRING:
+            case CONS:
+            case FUNCTION:
+            case MACRO:
+                return 1;
+        }
+    }
+    return 0;
+}
+
 static Object* eval_if_special_form(Map* env, Object* obj) {
     Object* cond = car(cdr(obj));
     Object* true_branch = car(cdr(cdr(obj)));
     Object* else_branch = car(cdr(cdr(cdr(obj))));
     
     Object* result = eval(env, cond);
-    if (result->num) {
+    if (is_truthy(result)) {
         return eval(env, true_branch);
     }
     
@@ -1082,6 +1094,12 @@ static Object* list(char** str) {
     next(str, buff);
     
     peek(str, buff);
+    
+    /* found an empty list which represents NULL/nil */
+    if (strcmp(buff, ")") == 0) {
+        next(str, buff);
+        return NULL;
+    }
 
     Object* temp = cons_new(NULL, NULL);
     obj = temp;
@@ -1117,7 +1135,8 @@ static Object* atom(char** str) {
     char buff[BUFF_SIZE] = {0};
     peek(str, buff);
 
-    if (is_number(*buff)) {
+    /* is_number or is_number with a minus at the beginning*/
+    if (is_number(*buff) || (*buff == '-' && is_number(*(buff+1)))) {
         obj = number_new(str_to_int(buff));
     } else if (is_string(*buff)) {
         obj = string_new(buff);
@@ -1197,6 +1216,7 @@ static char* read_string(FILE* fp) {
         if (fgets(temp, BUFF_SIZE, fp) != NULL) {
             memcpy(buff + p, temp, strlen(temp));
             p += strlen(temp);
+            buff[p] = 0;
             /* if next line will overfill the buffer, allocate extra space */
             if (p + BUFF_SIZE > buff_size ) {
                 buff = realloc(buff, buff_size * sizeof(char));
@@ -1231,6 +1251,34 @@ static void exec(Map* env, char* str) {
 
 }
 
+static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, size_t* fail_count) {
+    printf("=== testing (%s) ===\n", filename);
+    Object* obj;
+    
+    size_t test_no = 0;
+    
+    while (strlen(str) > 0) {
+        
+        obj = parse(&str);
+        
+        Object* first = car(obj);
+        if (first != NULL && strcmp(first->str, "deftest") == 0) {
+            Object* test_name = car(cdr(obj));
+            obj = eval(env, obj);
+            if (obj != NULL && obj->type == BOOL && obj->num == 1) {
+                printf("PASS ");
+                (*pass_count)++;
+            } else {
+                printf("FAIL ");
+                (*fail_count)++;
+            }
+            printf("%s\n", test_name->str);
+            test_no++;
+        }
+        
+    }
+}
+
 /*
  * End of scanning and parsing functions
  */
@@ -1263,8 +1311,6 @@ Object* builtin_type(Object* args[]) {
             return string_new("\"cons");
         case BOOL:
             return string_new("\"bool");
-        case NIL:
-            return string_new("\"nil");
         default:
             return string_new("\"unknown");
     }
@@ -1320,6 +1366,13 @@ Object* builtin_list(Object* args[]) {
     return list;
 }
 
+Object* builtin_read(Object* args[]) {
+    char* str = args[0]->str;
+    Object* obj = parse(&str);
+    return eval(gc->env_stack[gc->tos], obj);
+    
+}
+
 /* func is macro that just combines 'define' and 'lambda' to
  * create named functions */
 Object* builtin_func(Object* args[]) {
@@ -1337,6 +1390,20 @@ Object* builtin_defmacro(Object* args[]) {
     Object* body = args[2];
 
     return cons_new(symbol_new("define"), cons_new(name, cons_new(cons_new(symbol_new("macro"), cons_new(fn_args, cons_new(body, NULL))), NULL)));
+}
+
+Object* builtin_deftest(Object* args[]) {
+    
+    Object* test_name = args[0];
+    Object* test_body = args[1];
+    
+    return cons_new(symbol_new("do"), cons_new(cons_new(symbol_new("func"), cons_new(test_name, cons_new(cons_new(NULL, NULL), cons_new(test_body, NULL)))), cons_new(cons_new(test_name, NULL), NULL)));
+    
+}
+
+Object* builtin_assert(Object* args[]) {
+    
+    return cons_new(symbol_new("if"), cons_new(args[0], cons_new(symbol_new("true"), cons_new(symbol_new("false"), NULL))));
 }
 
 Object* builtin_macroexpand(Object* args[]) {
@@ -1359,13 +1426,19 @@ Object* builtin_equal(Object* args[]) {
     Object* a = args[0];
     Object* b = args[1];
     
-    if (a->type == b->type) {
+    if (a != NULL && b != NULL && a->type == b->type) {
         switch (a->type) {
             case NUMBER:
                 return bool_new(a->num == b->num);
+            case STRING:
+                return bool_new(strcmp(a->str, b->str) == 0);
             default:
-                return bool_new(a == b);
+                return bool_new(a->num == b->num);
         }
+    }
+    
+    if (a == NULL && b == NULL) {
+        return bool_new(1);
     }
     
     return bool_new(0);
@@ -1389,7 +1462,9 @@ Object* builtin_plus(Object* args[]) {
 Object* builtin_minus(Object* args[]) {
 
     int temp = 0;
-    int i = 0;
+    int i = 1;
+    
+    temp = args[0]->num;
 
     while (args[i] != NULL) {
         Object* arg = args[i];
@@ -1413,9 +1488,12 @@ static void init_env(Map* env) {
     map_put(env, "print", function_new(builtin_print));
     map_put(env, "import", function_new(builtin_import));
     map_put(env, "list", function_new(builtin_list));
+    map_put(env, "read", function_new(builtin_read));
     
     map_put(env, "func", macro_new(builtin_func));
     map_put(env, "defmacro", macro_new(builtin_defmacro));
+    map_put(env, "assert", macro_new(builtin_assert));
+    map_put(env, "deftest", macro_new(builtin_deftest));
     map_put(env, "macroexpand", function_new(builtin_macroexpand));
 
     map_put(env, "gc-mark", function_new(builtin_mark));
@@ -1442,19 +1520,50 @@ static void repl(Map* env) {
 
 }
 
+char is_test_file(char* filename) {
+    if(strlen(filename) > 10 && !strcmp(filename + strlen(filename) - 10, "_test.lisp")) {
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
 
+    int temp;
+    size_t successful_test_count = 0;
+    size_t failed_test_count = 0;
+    
     Map* env = map_new(INITIAL_ENV_SIZE);
     gc = gc_new(env);
     init_env(env);
+    
 
     /* Command line arguments were provided */
     if (argc > 1) {
-        char* filename = argv[1];
-        FILE *fp = fopen(filename, "r");
-        char* str = read_string(fp);
-        exec(env, str);
-        free(str);
+
+        /* Execute multiple files in order if they're passed in */
+        for (temp = 1; temp < argc; temp++) {
+            char* filename = argv[temp];
+            FILE *fp = fopen(filename, "r");
+            char* str = read_string(fp);
+            if (!is_test_file(filename)) {
+                exec(env, str);
+            } else {
+                exec_tests(env, filename, str, &successful_test_count, &failed_test_count);
+            }
+            fclose(fp);
+            free(str);
+        }
+        if (successful_test_count > 0 || failed_test_count > 0) {
+            printf("===============\n");
+            printf("executed %lu tests (%lu passed, %lu failed).\n", successful_test_count + failed_test_count, successful_test_count, failed_test_count);
+            printf("===============\n");
+            
+            if (failed_test_count > 0) {
+                fprintf(stderr, "exited because tests failed!\n");
+                exit(1);
+            }
+        }
     } else {
         repl(env);
     }
