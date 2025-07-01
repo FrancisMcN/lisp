@@ -1282,10 +1282,6 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
     
     test_no = 0;
 
-    printf("strlen: %lu\n", strlen(str));
-    
-    printf("%s\n", str);
-
     while (strlen(str) > 0) {
         
         obj = parse(&str);
