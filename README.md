@@ -1,3 +1,5 @@
+[![Lisp pipeline](https://github.com/FrancisMcN/lisp/actions/workflows/lisp.yml/badge.svg)](https://github.com/FrancisMcN/lisp/actions/workflows/lisp.yml)
+
 Lisp Interpreter implemented in C
 =================================
 
@@ -96,4 +98,10 @@ Below is an example showing how to assign a name to a function.
 > (define double (lambda (a) (+ a a)))
 > (double 10)
 20
+```
+
+Unit tests can be written using the special `deftest` macro. Currently this macro just expands to a function definition and a function call. An example unit test proving a list of of type `cons` is shown below.
+```lisp
+(deftest test_list_is_cons
+    (assert (= (type (list 1 2 3 4)) "cons")))
 ```
