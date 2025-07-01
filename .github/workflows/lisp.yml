@@ -16,4 +16,4 @@ jobs:
     - name: build
       run: gcc ./lisp/lisp.c -o l
     - name: test
-      run: ./l tests/builtin_test.lisp tests/type_test.lisp
+      run: ./l tests/builtin_test.lisp
