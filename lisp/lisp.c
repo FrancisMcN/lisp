@@ -52,7 +52,7 @@ typedef struct Object {
         char* str;
         Cons cons;
         Function fn;
-    };
+    } data;
 } Object;
 
 static Object* object_new(void);
@@ -120,6 +120,7 @@ static GC* gc_new(Map* env) {
 
 static void gc_mark(GC* gc) {
 
+    Object* temp;
     size_t i;
     size_t j;
     size_t count = 0;
@@ -138,7 +139,7 @@ static void gc_mark(GC* gc) {
         }
     }
 
-    Object* temp = gc->tail;
+    temp = gc->tail;
     while (temp != NULL) {
         if (temp->marked) {
             count++;
@@ -153,6 +154,7 @@ static void gc_mark(GC* gc) {
 
 static void gc_sweep(GC* gc) {
 
+    Object* temp;
     size_t count = 0;
     Object* ptr = gc->tail;
 
@@ -189,7 +191,7 @@ static void gc_sweep(GC* gc) {
                 gc->tail = ptr->next;
             }
 
-            Object* temp = ptr;
+            temp = ptr;
             ptr = ptr->prev;
             /* Actually free the object */
             object_free(temp);
@@ -247,9 +249,9 @@ static void object_mark(Object* obj) {
         switch (obj->type) {
             case FUNCTION:
             case MACRO: {
-                if (obj->fn.is_user_defined) {
-                    object_mark(obj->fn.args);
-                    object_mark(obj->fn.body);
+                if (obj->data.fn.is_user_defined) {
+                    object_mark(obj->data.fn.args);
+                    object_mark(obj->data.fn.body);
                 }
                 break;
             }
@@ -273,7 +275,7 @@ static void object_mark(Object* obj) {
 static Object* number_new(int num) {
     Object* obj = object_new();
     obj->type = NUMBER;
-    obj->num = num;
+    obj->data.num = num;
     return obj;
 }
 
@@ -288,8 +290,8 @@ static Object* symbol_new(char* symbol) {
     obj->type = SYMBOL;
 
     len = strlen(symbol);
-    obj->str = (char*)malloc(sizeof(char) * (len + 1));
-    strcpy(obj->str, symbol);
+    obj->data.str = (char*)malloc(sizeof(char) * (len + 1));
+    strcpy(obj->data.str, symbol);
     return obj;
 }
 
@@ -299,8 +301,8 @@ static Object* string_new(char* str) {
     obj->type = STRING;
 
     len = strlen(str) - 1;
-    obj->str = (char*)malloc(sizeof(char) * (len + 1));
-    strcpy(obj->str, str + 1);
+    obj->data.str = (char*)malloc(sizeof(char) * (len + 1));
+    strcpy(obj->data.str, str + 1);
     return obj;
 }
 
@@ -313,60 +315,62 @@ static Object* string_new(char* str) {
 static Object* cons_new(Object* car, Object* cdr) {
     Object* obj = object_new();
     obj->type = CONS;
-    obj->cons.car = car;
-    obj->cons.cdr = cdr;
+    obj->data.cons.car = car;
+    obj->data.cons.cdr = cdr;
     return obj;
 }
 
 static Object* user_defined_function_new(Object* args, Object* body) {
+    Function f;
     Object* obj = object_new();
     obj->type = FUNCTION;
-    obj->fn = (Function){
-        1,
-        0,
-        args,
-        body,
-        NULL,
-    };
+    
+    f.is_user_defined = 1;
+    f.is_macro = 0;
+    f.args = args;
+    f.body = body;
+    f.fn = NULL;
+    
+    obj->data.fn = f;
     return obj;
 }
 
 static Object* user_defined_macro_new(Object* args, Object* body) {
+    Function f;
     Object* obj = object_new();
     obj->type = MACRO;
-    obj->fn = (Function){
-        1,
-        1,
-        args,
-        body,
-        NULL,
-    };
+    f.is_user_defined = 1;
+    f.is_macro = 1;
+    f.args = args;
+    f.body = body;
+    f.fn = NULL;
+    obj->data.fn = f;
     return obj;
 }
 
 static Object* function_new(struct Object* (*fn)(struct Object** args)) {
+    Function f;
     Object* obj = object_new();
     obj->type = FUNCTION;
-    obj->fn = (Function){
-        0,
-        0,
-        0,
-        NULL,
-        fn
-    };
+    f.is_user_defined = 0;
+    f.is_macro = 0;
+    f.args = NULL;
+    f.body = NULL;
+    f.fn = fn;
+    obj->data.fn = f;
     return obj;
 }
 
 static Object* macro_new(struct Object* (*fn)(struct Object** args)) {
+    Function f;
     Object* obj = object_new();
     obj->type = MACRO;
-    obj->fn = (Function){
-        0,
-        1,
-        0,
-        NULL,
-        fn
-    };
+    f.is_user_defined = 0;
+    f.is_macro = 1;
+    f.args = NULL;
+    f.body = NULL;
+    f.fn = fn;
+    obj->data.fn = f;
     return obj;
 }
 
@@ -374,9 +378,9 @@ static Object* bool_new(char value) {
     Object* obj = object_new();
     obj->type = BOOL;
     if (value) {
-        obj->num = 1;
+        obj->data.num = 1;
     } else {
-        obj->num = 0;
+        obj->data.num = 0;
     }
     return obj;
 }
@@ -398,11 +402,11 @@ static void object_free(Object* obj) {
             break;
         }
         case STRING: {
-            free(obj->str);
+            free(obj->data.str);
             break;
         }
         case SYMBOL: {
-            free(obj->str);
+            free(obj->data.str);
             break;
         }
         case CONS: {
@@ -480,13 +484,15 @@ static void map_resize(Map* map) {
  * @param obj - the object to be associated with the key
  */
 static void map_put(Map* map, char* key, Object* obj) {
+    char* map_key;
+    size_t key_hash;
     size_t key_len = strlen(key);
 
     if (map->used == map->size - 1) {
         map_resize(map);
     }
 
-    size_t key_hash = hash(key) % (map->size - 1);
+    key_hash = hash(key) % (map->size - 1);
     if (map->data[key_hash].key == NULL) {
         /* Found a free space in the hash table, store the data in the map entry */
         char* map_key = malloc(sizeof(char) * key_len + 1);
@@ -509,7 +515,7 @@ static void map_put(Map* map, char* key, Object* obj) {
 
         }
         /* Finally a free space in the table, store the data in the map entry */
-        char* map_key = malloc(sizeof(char) * key_len + 1);
+        map_key = malloc(sizeof(char) * key_len + 1);
         strcpy(map_key, key);
 
         map->data[key_hash].key = map_key;
@@ -573,19 +579,20 @@ static void init_env(Map* env);
 
 static Object* car(Object* obj) {
     if (obj != NULL && obj->type == CONS) {
-        return obj->cons.car;
+        return obj->data.cons.car;
     }
     return NULL;
 }
 
 static Object* cdr(Object* obj) {
     if (obj != NULL && obj->type == CONS) {
-        return obj->cons.cdr;
+        return obj->data.cons.cdr;
     }
     return NULL;
 }
 
 static void fprint(FILE* fp, Object* obj) {
+    Object* temp;
 
     if (obj == NULL) {
         fprintf(fp, "nil");
@@ -594,17 +601,17 @@ static void fprint(FILE* fp, Object* obj) {
 
     switch (obj->type) {
         case NUMBER: {
-            fprintf(fp, "%d", obj->num);
+            fprintf(fp, "%d", obj->data.num);
             break;
         }
         case STRING:
         case SYMBOL: {
-            fprintf(fp, "%s", obj->str);
+            fprintf(fp, "%s", obj->data.str);
             break;
         }
         case CONS: {
             putc('(', fp);
-            Object* temp = obj;
+            temp = obj;
             while (temp != NULL) {
                 if (temp->type == CONS) {
                     fprint(fp, car(temp));
@@ -625,11 +632,11 @@ static void fprint(FILE* fp, Object* obj) {
         }
         case FUNCTION:
         case MACRO: {
-            fprintf(fp, "%p", &obj->fn);
+            fprintf(fp, "%p", (void*)&obj->data.fn.fn);
             break;
         }
         case BOOL: {
-            if (obj->num) {
+            if (obj->data.num) {
                 fprintf(fp, "true");
             } else {
                 fprintf(fp, "false");
@@ -738,12 +745,14 @@ static char is_string(char c) {
  */
 static char peek(char** str, char buff[]) {
 
-
+    char* temp;
+    char consumed;
+    char c;
     clear_buff(buff);
 
-    char* temp = *str;
-    char consumed = 0;
-    char c = *temp;
+    temp = *str;
+    consumed = 0;
+    c = *temp;
 
     while (c != 0) {
 
@@ -871,7 +880,7 @@ static char is_type(Object* object, Type obj_type) {
 static char is_special_form(Object* cons) {
     Object* first = car(cons);
     if (is_type(first, SYMBOL)) {
-        char* sym = first->str;
+        char* sym = first->data.str;
         if (strcmp(sym, "quote") == 0 ||
             strcmp(sym, "eval") == 0 ||
             strcmp(sym, "define") == 0 ||
@@ -896,7 +905,7 @@ static Object* eval_quote_special_form(Map* env, Object* obj) {
 static Object* eval_define_special_form(Map* env, Object* obj) {
     Object* name = car(cdr(obj));
     Object* value = car(cdr(cdr(obj)));
-    map_put(env, name->str, eval(env, value));
+    map_put(env, name->data.str, eval(env, value));
     return NULL;
 }
 
@@ -905,7 +914,7 @@ static char is_truthy(Object* obj) {
         switch (obj->type) {
             case NUMBER:
             case BOOL:
-                return obj->num > 0;
+                return obj->data.num > 0;
             case SYMBOL:
             case STRING:
             case CONS:
@@ -932,22 +941,26 @@ static Object* eval_if_special_form(Map* env, Object* obj) {
 
 Object* function_wrapper(Object* function, Object* args[]) {
     
+    Map* local_env;
+    Object* temp;
+    size_t i;
+    Object* res;
     /* Create new environment and push onto environment stack */
     gc->env_stack[++gc->tos] = map_new(INITIAL_ENV_SIZE);
-    Map* local_env = gc->env_stack[gc->tos];
+    local_env = gc->env_stack[gc->tos];
     
-    Object* temp = function->fn.args;
+    temp = function->data.fn.args;
     
     /* Store function arguments inside local environment */
-    size_t i = 0;
+    i = 0;
     while (car(temp) != NULL) {
         Object* name = car(temp);
-        map_put(local_env, name->str, args[i]);
+        map_put(local_env, name->data.str, args[i]);
         temp = cdr(temp);
         i++;
     }
     
-    Object* res = eval(gc->env_stack[gc->tos], function->fn.body);
+    res = eval(gc->env_stack[gc->tos], function->data.fn.body);
     
     /* Cleanup local environment after function has finished executing */
     map_free(local_env);
@@ -994,25 +1007,25 @@ static Object* eval_do_special_form(Map* env, Object* obj) {
  */
 static Object* eval_special_form(Map* env, Object* obj) {
     Object* first = car(obj);
-    if (strcmp(first->str, "quote") == 0) {
+    if (strcmp(first->data.str, "quote") == 0) {
         return eval_quote_special_form(env, obj);
     }
-    if (strcmp(first->str, "eval") == 0) {
+    if (strcmp(first->data.str, "eval") == 0) {
         return eval_eval_special_form(env, obj);
     }
-    if (strcmp(first->str, "define") == 0) {
+    if (strcmp(first->data.str, "define") == 0) {
         return eval_define_special_form(env, obj);
     }
-    if (strcmp(first->str, "lambda") == 0) {
+    if (strcmp(first->data.str, "lambda") == 0) {
         return eval_lambda_special_form(env, obj);
     }
-    if (strcmp(first->str, "macro") == 0) {
+    if (strcmp(first->data.str, "macro") == 0) {
         return eval_macro_special_form(env, obj);
     }
-    if (strcmp(first->str, "do") == 0) {
+    if (strcmp(first->data.str, "do") == 0) {
         return eval_do_special_form(env, obj);
     }
-    if (strcmp(first->str, "if") == 0) {
+    if (strcmp(first->data.str, "if") == 0) {
         return eval_if_special_form(env, obj);
     }
     return NULL;
@@ -1026,6 +1039,8 @@ static Object* eval_special_form(Map* env, Object* obj) {
  */
 static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
     int i;
+    Object* arg;
+    Object* temp;
     Object* result = NULL;
     Object* function = eval(env, car(obj));
     Object* args[MAX_FUNC_ARGS] = {0};
@@ -1037,13 +1052,13 @@ static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
         return NULL;
     }
 
-    Object* temp = obj;
+    temp = obj;
     i = 0;
     while (car(temp) != NULL) {
         temp = cdr(temp);
-        Object* arg;
+        
         /* Don't evaluate args if the function is a macro */
-        if (!function->fn.is_macro) {
+        if (!function->data.fn.is_macro) {
             arg = eval(env, car(temp));
         } else {
             arg = car(temp);
@@ -1052,13 +1067,13 @@ static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
 
     }
     
-    if (!function->fn.is_user_defined) {
-        result = function->fn.fn(args);
+    if (!function->data.fn.is_user_defined) {
+        result = function->data.fn.fn(args);
     } else {
         result = function_wrapper(function, args);
     }
     
-    if (expand_macro && function->fn.is_macro) {
+    if (expand_macro && function->data.fn.is_macro) {
         result = eval(env, result);
     }
     
@@ -1089,6 +1104,8 @@ static Object* eval_list(Map* env, Object* obj) {
  */
 static Object* list(char** str) {
 
+    Object* temp;
+    Object* prev;
     Object* obj = NULL;
     char buff[BUFF_SIZE] = {0};
     next(str, buff);
@@ -1101,22 +1118,22 @@ static Object* list(char** str) {
         return NULL;
     }
 
-    Object* temp = cons_new(NULL, NULL);
+    temp = cons_new(NULL, NULL);
     obj = temp;
-    Object* prev = temp;
+    prev = temp;
     while (is_expr(buff)) {
-        temp->cons.car = expr(str);
+        temp->data.cons.car = expr(str);
 
-        temp->cons.cdr = cons_new(NULL, NULL);
+        temp->data.cons.cdr = cons_new(NULL, NULL);
         prev = temp;
-        temp = temp->cons.cdr;
+        temp = temp->data.cons.cdr;
 
         peek(str, buff);
     }
 
     /* Remove extra empty cons cell, we don't need to free
      * the extra cons cell because we have garbage collection */
-    prev->cons.cdr = NULL;
+    prev->data.cons.cdr = NULL;
 
     next(str, buff);
     if (strcmp(buff, ")") != 0) {
@@ -1179,7 +1196,7 @@ Object* eval(Map* env, Object* obj) {
             case SYMBOL: {
                 size_t i = gc->tos;
                 while (res == NULL && (0 <= i && i <= MAX_ENV_COUNT)) {
-                    res = map_get(gc->env_stack[i], obj->str);
+                    res = map_get(gc->env_stack[i], obj->data.str);
                     i--;
                 }
                 break;
@@ -1207,7 +1224,7 @@ static char* read_string(FILE* fp) {
 
     size_t p = 0;
     size_t buff_size = BUFF_SIZE;
-    // char* buff = malloc(buff_size * sizeof(char));
+    
     char* buff = malloc(buff_size * sizeof(char));
 
     while (fp != NULL && !feof(fp) && !ferror(fp)) {
@@ -1252,27 +1269,29 @@ static void exec(Map* env, char* str) {
 }
 
 static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, size_t* fail_count) {
-    printf("=== testing (%s) ===\n", filename);
+    Object* first;
     Object* obj;
+    size_t test_no;
+    printf("=== testing (%s) ===\n", filename);
     
-    size_t test_no = 0;
+    test_no = 0;
     
     while (strlen(str) > 0) {
         
         obj = parse(&str);
         
-        Object* first = car(obj);
-        if (first != NULL && strcmp(first->str, "deftest") == 0) {
+        first = car(obj);
+        if (first != NULL && strcmp(first->data.str, "deftest") == 0) {
             Object* test_name = car(cdr(obj));
             obj = eval(env, obj);
-            if (obj != NULL && obj->type == BOOL && obj->num == 1) {
+            if (obj != NULL && obj->type == BOOL && obj->data.num == 1) {
                 printf("PASS ");
                 (*pass_count)++;
             } else {
                 printf("FAIL ");
                 (*fail_count)++;
             }
-            printf("%s\n", test_name->str);
+            printf("%s\n", test_name->data.str);
             test_no++;
         }
         
@@ -1327,6 +1346,9 @@ Object* builtin_print(Object* args[]) {
 }
 
 Object* builtin_import(Object* args[]) {
+    char* filename;
+    FILE *fp;
+    char* str;
     Object* import_path = args[0];
     if (import_path == NULL || import_path->type != STRING) {
         fprintf(stderr, "import requires 1 parameter which must be a string.\n");
@@ -1334,14 +1356,14 @@ Object* builtin_import(Object* args[]) {
     }
     
     /* Read file and evaluate each line */
-    char* filename = import_path->str;
-    FILE *fp = fopen(filename, "r");
+    filename = import_path->data.str;
+    fp = fopen(filename, "r");
     if (fp == NULL) {
         fprintf(stderr, "import error: '%s' file not found\n", filename);
         return NULL;
     }
     
-    char* str = read_string(fp);
+    str = read_string(fp);
     exec(gc->env_stack[gc->tos], str);
     free(str);
     return NULL;
@@ -1353,21 +1375,21 @@ Object* builtin_list(Object* args[]) {
     Object* list = temp;
     Object* prev = temp;
     while (args[i] != NULL) {
-        temp->cons.car = args[i];
-        temp->cons.cdr = cons_new(NULL, NULL);
+        temp->data.cons.car = args[i];
+        temp->data.cons.cdr = cons_new(NULL, NULL);
         prev = temp;
-        temp = temp->cons.cdr;
+        temp = temp->data.cons.cdr;
         i++;
     }
 
     /* Remove extra empty cons cell, we don't need to free
      * the extra cons cell because we have garbage collection */
-    prev->cons.cdr = NULL;
+    prev->data.cons.cdr = NULL;
     return list;
 }
 
 Object* builtin_read(Object* args[]) {
-    char* str = args[0]->str;
+    char* str = args[0]->data.str;
     Object* obj = parse(&str);
     return eval(gc->env_stack[gc->tos], obj);
     
@@ -1429,11 +1451,11 @@ Object* builtin_equal(Object* args[]) {
     if (a != NULL && b != NULL && a->type == b->type) {
         switch (a->type) {
             case NUMBER:
-                return bool_new(a->num == b->num);
+                return bool_new(a->data.num == b->data.num);
             case STRING:
-                return bool_new(strcmp(a->str, b->str) == 0);
+                return bool_new(strcmp(a->data.str, b->data.str) == 0);
             default:
-                return bool_new(a->num == b->num);
+                return bool_new(a->data.num == b->data.num);
         }
     }
     
@@ -1452,7 +1474,7 @@ Object* builtin_plus(Object* args[]) {
 
     while (args[i] != NULL) {
         Object* arg = args[i];
-        temp += arg->num;
+        temp += arg->data.num;
         i++;
     }
 
@@ -1464,11 +1486,11 @@ Object* builtin_minus(Object* args[]) {
     int temp = 0;
     int i = 1;
     
-    temp = args[0]->num;
+    temp = args[0]->data.num;
 
     while (args[i] != NULL) {
         Object* arg = args[i];
-        temp -= arg->num;
+        temp -= arg->data.num;
         i++;
     }
 
