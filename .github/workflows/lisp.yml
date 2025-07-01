@@ -7,11 +7,13 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  test:
 
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
     - name: build
-      run: gcc ./lisp/lisp.c -o l
+      run: gcc -ansi -pedantic ./lisp/lisp.c -o l
+    - name: test
+      run: ./l tests/builtin_test.lisp tests/type_test.lisp
