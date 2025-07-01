@@ -15,3 +15,5 @@ jobs:
     - uses: actions/checkout@v4
     - name: build
       run: gcc ./lisp/lisp.c -o l
+    - name: test
+      run: ./l tests/type_test.lisp tests/builtin_test.lisp
