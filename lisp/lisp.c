@@ -433,10 +433,16 @@ static void object_free(Object* obj) {
  * @return - returns a new, empty map
  */
 static Map* map_new(size_t size) {
+    size_t i;
     Map* map = (Map*)malloc(sizeof(Map));
     map->used = 0;
     map->size = size;
     map->data = malloc(sizeof(MapEntry) * size);
+    
+    for (i = 0; i < size; i++) {
+        map->data[i].key = NULL;
+        map->data[i].value = NULL;
+    }
     return map;
 }
 
@@ -1418,7 +1424,6 @@ Object* builtin_deftest(Object* args[]) {
     
     Object* test_name = args[0];
     Object* test_body = args[1];
-    
     return cons_new(symbol_new("do"), cons_new(cons_new(symbol_new("func"), cons_new(test_name, cons_new(cons_new(NULL, NULL), cons_new(test_body, NULL)))), cons_new(cons_new(test_name, NULL), NULL)));
     
 }
