@@ -14,4 +14,4 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: build
-      run: gcc ./lisp/lisp.c -o lisp
+      run: gcc ./lisp/lisp.c -o l
