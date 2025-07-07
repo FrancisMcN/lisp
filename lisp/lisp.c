@@ -1448,27 +1448,34 @@ Object* builtin_sweep(Object* args[]) {
     return NULL;
 }
 
-Object* builtin_equal(Object* args[]) {
-
-    Object* a = args[0];
-    Object* b = args[1];
-    
+static char is_equal(Object* a, Object* b) {
     if (a != NULL && b != NULL && a->type == b->type) {
         switch (a->type) {
             case NUMBER:
-                return bool_new(a->data.num == b->data.num);
+                return a->data.num == b->data.num;
             case STRING:
-                return bool_new(strcmp(a->data.str, b->data.str) == 0);
+                return strcmp(a->data.str, b->data.str) == 0;
+            case CONS: {
+                if (is_equal(car(a), car(b))) {
+                    return is_equal(cdr(a), cdr(b));
+                }
+                return 0;
+            }
             default:
-                return bool_new(a->data.num == b->data.num);
+                return a->data.num == b->data.num;
         }
     }
     
     if (a == NULL && b == NULL) {
-        return bool_new(1);
+        return 1;
     }
     
-    return bool_new(0);
+    return 0;
+}
+
+Object* builtin_equal(Object* args[]) {
+    
+    return bool_new(is_equal(args[0], args[1]));
     
 }
 
