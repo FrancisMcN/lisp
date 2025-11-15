@@ -88,6 +88,12 @@ The `do` special form is now supported, it's useful for when you want to include
 3
 ```
 
+The `let` special form is supported too. You can use the let special form to create local variables.
+```lisp
+(let (x 1 y 2) (do 
+    (+ x y)))
+```
+
 User-defined functions are now supported using the built-in `lambda` special form. You can either assign the function to a symbol or you can call it directly.
 ```lisp
 > ((lambda (name) (print name)) "francis")
