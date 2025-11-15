@@ -8,8 +8,5 @@
     (let (a 5 b 7)
         (assert (= (+ a b) 12))))
 
-;; (deftest test_shorthand_quote_special_form
-;;     (assert (= 'x (quote x))))
-
 (deftest test_shorthand_quote_special_form
-    (assert (= (quote a) (quote a))))
+    (assert (= (quote a) 'a)))

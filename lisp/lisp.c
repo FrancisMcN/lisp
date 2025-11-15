@@ -870,7 +870,7 @@ static char is_atom(char buff[]) {
  * @return - true or false
  */
 static char is_expr(char buff[]) {
-    if (*buff == '(' || is_atom(buff)) {
+    if (*buff == '\'' || *buff == '(' || is_atom(buff)) {
         return 1;
     }
     return 0;
@@ -1517,6 +1517,8 @@ static char is_equal(Object* a, Object* b) {
             case NUMBER:
                 return a->data.num == b->data.num;
             case STRING:
+                return strcmp(a->data.str, b->data.str) == 0;
+            case SYMBOL:
                 return strcmp(a->data.str, b->data.str) == 0;
             case CONS: {
                 if (is_equal(car(a), car(b))) {
