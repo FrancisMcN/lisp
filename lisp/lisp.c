@@ -893,11 +893,53 @@ static char is_special_form(Object* cons) {
             strcmp(sym, "lambda") == 0 ||
             strcmp(sym, "macro") == 0 ||
             strcmp(sym, "do") == 0 ||
+            strcmp(sym, "let") == 0 ||
             strcmp(sym, "if") == 0) {
             return 1;
             }
     }
     return 0;
+}
+
+Map* push_local_environment(void) {
+    /* Create new environment and push onto environment stack */
+    gc->env_stack[++gc->tos] = map_new(INITIAL_ENV_SIZE);
+    return gc->env_stack[gc->tos];
+}
+
+void pop_local_environment(void) {
+    /* Pop local environment */
+    map_free(gc->env_stack[gc->tos]);
+    gc->env_stack[gc->tos] = NULL;
+    gc->tos--;
+}
+
+Object* function_wrapper(Object* function, Object* args[]) {
+    
+    Map* local_env;
+    Object* temp;
+    size_t i;
+    Object* res;
+    /* Create new environment and push onto environment stack */
+    local_env = push_local_environment();
+    
+    temp = function->data.fn.args;
+    
+    /* Store function arguments inside local environment */
+    i = 0;
+    while (car(temp) != NULL) {
+        Object* name = car(temp);
+        map_put(local_env, name->data.str, args[i]);
+        temp = cdr(temp);
+        i++;
+    }
+    
+    res = eval(gc->env_stack[gc->tos], function->data.fn.body);
+    
+    /* Cleanup local environment after function has finished executing */
+    pop_local_environment();
+    
+    return res;
 }
 
 static Object* eval_eval_special_form(Map* env, Object* obj) {
@@ -913,6 +955,30 @@ static Object* eval_define_special_form(Map* env, Object* obj) {
     Object* value = car(cdr(cdr(obj)));
     map_put(env, name->data.str, eval(env, value));
     return NULL;
+}
+
+static Object* eval_let_special_form(Map* env, Object* obj) {
+    Map* local_env;
+    Object* temp;
+    Object* let_body;
+    Object* res;
+
+    local_env = push_local_environment();
+
+    temp = car(cdr(obj));
+    let_body = car(cdr(cdr(obj)));
+    while (temp != NULL) {
+        Object* name = car(temp);
+        Object* value = car(cdr(temp));
+        map_put(local_env, name->data.str, value);
+        temp = cdr(cdr(temp));
+    }
+
+    res = eval(local_env, let_body);
+
+    pop_local_environment();
+
+    return res;
 }
 
 static char is_truthy(Object* obj) {
@@ -944,38 +1010,6 @@ static Object* eval_if_special_form(Map* env, Object* obj) {
     
     return eval(env, else_branch);
 }
-
-Object* function_wrapper(Object* function, Object* args[]) {
-    
-    Map* local_env;
-    Object* temp;
-    size_t i;
-    Object* res;
-    /* Create new environment and push onto environment stack */
-    gc->env_stack[++gc->tos] = map_new(INITIAL_ENV_SIZE);
-    local_env = gc->env_stack[gc->tos];
-    
-    temp = function->data.fn.args;
-    
-    /* Store function arguments inside local environment */
-    i = 0;
-    while (car(temp) != NULL) {
-        Object* name = car(temp);
-        map_put(local_env, name->data.str, args[i]);
-        temp = cdr(temp);
-        i++;
-    }
-    
-    res = eval(gc->env_stack[gc->tos], function->data.fn.body);
-    
-    /* Cleanup local environment after function has finished executing */
-    map_free(local_env);
-    gc->env_stack[gc->tos] = NULL;
-    gc->tos--;
-    
-    return res;
-}
-
 
 static Object* eval_lambda_special_form(Map* env, Object* obj) {
     
@@ -1030,6 +1064,9 @@ static Object* eval_special_form(Map* env, Object* obj) {
     }
     if (strcmp(first->data.str, "do") == 0) {
         return eval_do_special_form(env, obj);
+    }
+    if (strcmp(first->data.str, "let") == 0) {
+        return eval_let_special_form(env, obj);
     }
     if (strcmp(first->data.str, "if") == 0) {
         return eval_if_special_form(env, obj);
