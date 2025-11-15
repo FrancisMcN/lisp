@@ -10,3 +10,6 @@
 
 (deftest test_shorthand_quote_special_form
     (assert (= 'x (quote x))))
+
+(deftest test_shorthand_quote_special_form2
+    (assert (= 'a (quote a))))
