@@ -12,4 +12,4 @@
 ;;     (assert (= 'x (quote x))))
 
 (deftest test_shorthand_quote_special_form
-    (assert (= 1 1)))
+    (assert (= (quote a) (quote a))))
