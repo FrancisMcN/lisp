@@ -776,6 +776,18 @@ static char peek(char** str, char buff[]) {
             break;
         }
 
+        if (c == '\'') {
+            consumed++;
+            *buff = '\'';
+            break;
+        }
+
+        if (c == '`') {
+            consumed++;
+            *buff = '`';
+            break;
+        }
+
         /* Ignore whitespace, tabs, returns and newlines */
         if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
             consumed++;
@@ -858,7 +870,7 @@ static char is_atom(char buff[]) {
  * @return - true or false
  */
 static char is_expr(char buff[]) {
-    if (*buff == '(' || is_atom(buff)) {
+    if (*buff == '\'' || *buff == '(' || is_atom(buff)) {
         return 1;
     }
     return 0;
@@ -1140,6 +1152,17 @@ static Object* eval_list(Map* env, Object* obj) {
 }
 
 /**
+ * Rewrites 'expr as (quote expr)
+ * @param str - the input stream
+ * @return - (quote expr)
+ */
+static Object* quote(char** str) {
+    char buff[BUFF_SIZE] = {0};
+    next(str, buff);
+    return cons_new(symbol_new("quote"), cons_new(expr(str), NULL));
+}
+
+/**
  * Parses a list and produces a cons object.
  * list : '(' expr* ')'
  * @param str - the input stream
@@ -1215,7 +1238,10 @@ static Object* atom(char** str) {
 static Object* expr(char** str) {
     char buff[BUFF_SIZE] = {0};
     peek(str, buff);
-    if (strcmp(buff, "(") == 0) {
+    if (strcmp(buff, "'") == 0) {
+       /* found a shorthand quote */
+        return quote(str);
+    } else if (strcmp(buff, "(") == 0) {
        /* found a list */
         return list(str);
     } else {
@@ -1491,6 +1517,8 @@ static char is_equal(Object* a, Object* b) {
             case NUMBER:
                 return a->data.num == b->data.num;
             case STRING:
+                return strcmp(a->data.str, b->data.str) == 0;
+            case SYMBOL:
                 return strcmp(a->data.str, b->data.str) == 0;
             case CONS: {
                 if (is_equal(car(a), car(b))) {
