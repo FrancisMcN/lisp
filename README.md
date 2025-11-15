@@ -49,13 +49,15 @@ symbol
 number
 ```
 
-Quoting is common in Lisp and is supported by the `quote` special form. The shorthand `'` is not yet supported.
+Quoting is common in Lisp and is supported by the `quote` special form. The shorthand `'` is also supported.
 
 ```lisp
 > (quote (+ 1 2 3))
 (+ 1 2 3)
 > (+ 1 2 3)
 6
+> 'abc
+abc
 ```
 
 I've implemented the beginnings of a simple mark and sweep garbage collector which can be triggered using two built-in functions.
@@ -90,8 +92,8 @@ The `do` special form is now supported, it's useful for when you want to include
 
 The `let` special form is supported too. You can use the let special form to create local variables.
 ```lisp
-(let (x 1 y 2) (do 
-    (+ x y)))
+(let (x 1 y 2)
+    (do (+ x y)))
 ```
 
 User-defined functions are now supported using the built-in `lambda` special form. You can either assign the function to a symbol or you can call it directly.
