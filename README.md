@@ -49,6 +49,14 @@ symbol
 number
 ```
 
+The builtin `append` function is now supported. Append takes one or more lists and creates a new list containing all of the elements from the original lists.
+```lisp
+> (define x '(a b c d))
+> (define y '(x y z))
+> (append x y)
+(a b c d x y z)
+```
+
 Quoting is common in Lisp and is supported by the `quote` special form. The shorthand `'` is also supported.
 
 ```lisp
@@ -58,6 +66,14 @@ Quoting is common in Lisp and is supported by the `quote` special form. The shor
 6
 > 'abc
 abc
+```
+
+Quasi-quoting is also supported to make writing macros easier. Quasi-quoting allows you to `unquote` certain elements within your quoted list. It also makes generating lists within a macro easier
+
+```lisp
+> (define b 7)
+> `(a ,b c)
+(a 7 c)
 ```
 
 I've implemented the beginnings of a simple mark and sweep garbage collector which can be triggered using two built-in functions.
