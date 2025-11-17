@@ -726,6 +726,8 @@ static char is_symbol(char c) {
             case '(':
             case ')':
             case '\'':
+            case '`':
+            case ',':
                 return 0;
             default:
                 return 1;
@@ -785,6 +787,12 @@ static char peek(char** str, char buff[]) {
         if (c == '`') {
             consumed++;
             *buff = '`';
+            break;
+        }
+
+        if (c == ',') {
+            consumed++;
+            *buff = ',';
             break;
         }
 
@@ -870,7 +878,7 @@ static char is_atom(char buff[]) {
  * @return - true or false
  */
 static char is_expr(char buff[]) {
-    if (*buff == '\'' || *buff == '(' || is_atom(buff)) {
+    if (*buff == '\'' || *buff == '`' || *buff == ',' || *buff == '(' || is_atom(buff)) {
         return 1;
     }
     return 0;
@@ -900,6 +908,7 @@ static char is_special_form(Object* cons) {
     if (is_type(first, SYMBOL)) {
         char* sym = first->data.str;
         if (strcmp(sym, "quote") == 0 ||
+            strcmp(sym, "quasiquote") == 0 ||
             strcmp(sym, "eval") == 0 ||
             strcmp(sym, "define") == 0 ||
             strcmp(sym, "lambda") == 0 ||
@@ -913,20 +922,35 @@ static char is_special_form(Object* cons) {
     return 0;
 }
 
-Map* push_local_environment(void) {
+/**
+ * Determines whether obj is an instance of the unquote special form
+ * @param obj - the object to test
+ * @return - true if obj is an instance of the unquote special form
+ */
+static char is_unquote(Object* obj) {
+    if (is_type(obj, CONS)) {
+        Object* item = car(obj);
+        if (is_type(item, SYMBOL) && strcmp(item->data.str, "unquote") == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static Map* push_local_environment(void) {
     /* Create new environment and push onto environment stack */
     gc->env_stack[++gc->tos] = map_new(INITIAL_ENV_SIZE);
     return gc->env_stack[gc->tos];
 }
 
-void pop_local_environment(void) {
+static void pop_local_environment(void) {
     /* Pop local environment */
     map_free(gc->env_stack[gc->tos]);
     gc->env_stack[gc->tos] = NULL;
     gc->tos--;
 }
 
-Object* function_wrapper(Object* function, Object* args[]) {
+static Object* function_wrapper(Object* function, Object* args[]) {
     
     Map* local_env;
     Object* temp;
@@ -960,6 +984,44 @@ static Object* eval_eval_special_form(Map* env, Object* obj) {
 
 static Object* eval_quote_special_form(Map* env, Object* obj) {
     return car(cdr(obj));
+}
+
+/**
+ * Evaluates the quasiquote special form.
+ * (quasiquote (a b c ,d) becomes (append (list (quote a)) (list (quote b)) (list (quote c)) (list d))
+ * @param env - the current environment
+ * @param obj - the instance of the quasiquote special form
+ * @return - the evaluated special form
+ */
+static Object* eval_quasiquote_special_form(Map* env, Object* obj) {
+    Object* temp;
+    Object* cur;
+    Object* res;
+    Object* prev;
+
+    temp = car(cdr(obj));
+    cur = cons_new(NULL, NULL);
+    prev = cur;
+    res = cur;
+    while (temp != NULL) {
+
+        Object* item = car(temp);
+        if (!is_unquote(item)) {
+            item = cons_new(symbol_new("quote"), cons_new(item, NULL));
+        } else {
+            item = car(cdr(item));
+        }
+
+        cur->data.cons.car = cons_new(symbol_new("list"), cons_new(item, NULL));
+        cur->data.cons.cdr = cons_new(NULL, NULL);
+        prev = cur;
+        cur = cur->data.cons.cdr;
+        temp = cdr(temp);
+    }
+
+    prev->data.cons.cdr = NULL;
+
+    return eval(gc->env_stack[gc->tos], cons_new(symbol_new("append"), res));
 }
 
 static Object* eval_define_special_form(Map* env, Object* obj) {
@@ -1062,6 +1124,9 @@ static Object* eval_special_form(Map* env, Object* obj) {
     if (strcmp(first->data.str, "quote") == 0) {
         return eval_quote_special_form(env, obj);
     }
+    if (strcmp(first->data.str, "quasiquote") == 0) {
+        return eval_quasiquote_special_form(env, obj);
+    }
     if (strcmp(first->data.str, "eval") == 0) {
         return eval_eval_special_form(env, obj);
     }
@@ -1162,6 +1227,18 @@ static Object* quote(char** str) {
     return cons_new(symbol_new("quote"), cons_new(expr(str), NULL));
 }
 
+static Object* unquote(char** str) {
+    char buff[BUFF_SIZE] = {0};
+    next(str, buff);
+    return cons_new(symbol_new("unquote"), cons_new(expr(str), NULL));
+}
+
+static Object* quasiquote(char** str) {
+    char buff[BUFF_SIZE] = {0};
+    next(str, buff);
+    return cons_new(symbol_new("quasiquote"), cons_new(expr(str), NULL));
+}
+
 /**
  * Parses a list and produces a cons object.
  * list : '(' expr* ')'
@@ -1241,7 +1318,13 @@ static Object* expr(char** str) {
     if (strcmp(buff, "'") == 0) {
        /* found a shorthand quote */
         return quote(str);
-    } else if (strcmp(buff, "(") == 0) {
+    } else if (strcmp(buff, "`") == 0) {
+        /* found a quasiquote */
+         return quasiquote(str);
+     } else if (strcmp(buff, ",") == 0) {
+         /* found a unquote */
+          return unquote(str);
+      } else if (strcmp(buff, "(") == 0) {
        /* found a list */
         return list(str);
     } else {
@@ -1464,6 +1547,30 @@ Object* builtin_read(Object* args[]) {
     
 }
 
+Object* builtin_append(Object* args[]) {
+    
+    size_t i = 0;
+    Object* res = cons_new(NULL, NULL);
+    
+    Object* prev = res;
+    Object* cur = res;
+    
+    while (args[i] != NULL) {
+        Object* temp = args[i];
+        while (temp != NULL) {
+            cur->data.cons.car = car(temp);
+            cur->data.cons.cdr = cons_new(NULL, NULL);
+            prev = cur;
+            cur = cur->data.cons.cdr;
+            temp = cdr(temp);
+        }
+        i += 1;
+    }
+    prev->data.cons.cdr = NULL;
+    
+    return res;
+}
+
 /* func is macro that just combines 'define' and 'lambda' to
  * create named functions */
 Object* builtin_func(Object* args[]) {
@@ -1588,6 +1695,7 @@ static void init_env(Map* env) {
     map_put(env, "import", function_new(builtin_import));
     map_put(env, "list", function_new(builtin_list));
     map_put(env, "read", function_new(builtin_read));
+    map_put(env, "append", function_new(builtin_append));
     
     map_put(env, "func", macro_new(builtin_func));
     map_put(env, "defmacro", macro_new(builtin_defmacro));
