@@ -29,3 +29,9 @@
     
 (deftest test_cdr_of_empty_list_is_nil
     (assert (= (cdr ()) nil)))
+    
+(deftest test_logical_equals_of_two_lists
+    (assert (= '(a b c) '(a b c))))
+
+(deftest test_append_joins_multiple_lists_together
+    (assert (= (append '(a b c) '(d e f)) '(a b c d e f))))

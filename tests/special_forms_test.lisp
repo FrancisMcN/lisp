@@ -10,3 +10,13 @@
 
 (deftest test_shorthand_quote_special_form
     (assert (= (quote a) 'a)))
+    
+(deftest test_quasiquote_shorthand_equals_long_form
+    (assert (= `(a b c) (quasiquote (a b c)))))
+
+(deftest test_quasiquote_doesnt_evaluate_symbols
+    (assert (= `(a b c) '(a b c))))
+
+(deftest test_quasiquote_symbols_can_be_unquoted
+    (let (c 5)
+        (assert (= `(a b ,c) '(a b 5)))))
