@@ -105,6 +105,10 @@ typedef struct GC {
     size_t tos;
 } GC;
 
+/* Instantiate the global reference to the garbage collector,
+ * I hate global variables but will allow this one. */
+static GC* gc;
+
 static GC* gc_new(Map* env) {
     size_t i;
     
@@ -117,6 +121,32 @@ static GC* gc_new(Map* env) {
     gc->tos = 0;
     gc->env_stack[0] = env;
     return gc;
+}
+
+/**
+ * Tests the type of an object, just a helper method to
+ * reduce some duplicated code.
+ * @param object - the object to test
+ * @param obj_type - the type to compare against
+ * @return - returns true if the object is of type 'obj_type'
+ */
+static char is_type(Object* object, Type obj_type) {
+    if (object != NULL) {
+        return (char) object->type == obj_type;
+    }
+    return 0;
+}
+
+/**
+ * Checks whether debug mode is enabled
+ * @return - returns true if debug mode is enabled
+ */
+static char is_debug_enabled(void) {
+    Object* obj = map_get(gc->env_stack[gc->tos], "/lisp/debug-mode");
+    if (is_type(obj, BOOL) && obj->data.num == 1) {
+        return 1;
+    }
+    return 0;
 }
 
 static void gc_mark(GC* gc) {
@@ -149,7 +179,9 @@ static void gc_mark(GC* gc) {
         temp = temp->prev;
     }
 
-    printf("marked %lu objects out of %lu total objects.\n", count, total);
+    if (is_debug_enabled()) {
+        printf("marked %lu objects out of %lu total objects.\n", count, total);
+    }
     gc->objects_at_last_collection = total;
 
 }
@@ -207,17 +239,15 @@ static void gc_sweep(GC* gc) {
 
     gc->objects_since_last_collection = 0;
 
-    printf("freed %lu objects.\n", count);
+    if (is_debug_enabled()) {
+        printf("freed %lu objects.\n", count);
+    }
 
 }
 
 static void gc_free(GC* gc) {
     free(gc);
 }
-
-/* Instantiate the global reference to the garbage collector,
- * I hate global variables but will allow this one. */
-static GC* gc;
 
 /**
  * Creates a new Object using malloc, don't forget to free!
@@ -914,20 +944,6 @@ static Object* peek(char** str, char buff[]) {
 
     return number_new(consumed);
 
-}
-
-/**
- * Tests the type of an object, just a helper method to
- * reduce some duplicated code.
- * @param object - the object to test
- * @param obj_type - the type to compare against
- * @return - returns true if the object is of type 'obj_type'
- */
-static char is_type(Object* object, Type obj_type) {
-    if (object != NULL) {
-        return (char) object->type == obj_type;
-    }
-    return 0;
 }
 
 /**
