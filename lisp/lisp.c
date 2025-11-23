@@ -611,6 +611,32 @@ static void map_free(Map* map) {
 Object* eval(Map* env, Object* obj);
 static void init_env(Map* env);
 
+static Object* type(Object* obj) {
+    if (obj == NULL) {
+        return string_new("\"nil");
+    }
+    switch (obj->type) {
+        case NUMBER:
+            return string_new("\"number");
+        case SYMBOL:
+            return string_new("\"symbol");
+        case STRING:
+            return string_new("\"string");
+        case ERROR:
+            return string_new("\"error");
+        case FUNCTION:
+            return string_new("\"function");
+        case MACRO:
+            return string_new("\"macro");
+        case CONS:
+            return string_new("\"cons");
+        case BOOL:
+            return string_new("\"bool");
+        default:
+            return string_new("\"unknown");
+    }
+}
+
 static Object* car(Object* obj) {
     if (obj != NULL && obj->type == CONS) {
         return obj->data.cons.car;
@@ -1526,30 +1552,7 @@ Object* builtin_cdr(Object* args[]) {
 }
 
 Object* builtin_type(Object* args[]) {
-    Object* obj = args[0];
-    if (obj == NULL) {
-        return string_new("\"nil");
-    }
-    switch (obj->type) {
-        case NUMBER:
-            return string_new("\"number");
-        case SYMBOL:
-            return string_new("\"symbol");
-        case STRING:
-            return string_new("\"string");
-        case ERROR:
-            return string_new("\"error");
-        case FUNCTION:
-            return string_new("\"function");
-        case MACRO:
-            return string_new("\"macro");
-        case CONS:
-            return string_new("\"cons");
-        case BOOL:
-            return string_new("\"bool");
-        default:
-            return string_new("\"unknown");
-    }
+    return type(args[0]);
 }
 
 Object* builtin_cons(Object* args[]) {
@@ -1622,8 +1625,15 @@ Object* builtin_append(Object* args[]) {
     Object* prev = res;
     Object* cur = res;
     
+    char error_buff[255];
+
     while (args[i] != NULL) {
         Object* temp = args[i];
+        if (!is_type(temp, CONS)) {
+            sprintf(error_buff, "type error: append expects each argument to be a list but argument %lu is a %s.\n", i, type(temp)->data.str);
+            error_buff[254] = 0;
+            return error_new(error_buff);
+        }
         while (temp != NULL) {
             cur->data.cons.car = car(temp);
             cur->data.cons.cdr = cons_new(NULL, NULL);

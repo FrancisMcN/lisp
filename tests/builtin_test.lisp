@@ -35,3 +35,6 @@
 
 (deftest test_append_joins_multiple_lists_together
     (assert (= (append '(a b c) '(d e f)) '(a b c d e f))))
+    
+(deftest test_appending_non_lists_returns_error
+    (assert (= (type (append '(a b c) 1 2 3)) "error")))
