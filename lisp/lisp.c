@@ -18,7 +18,7 @@ static int str_to_int(char* str) {
 }
 
 /* The native object types used by the interpreter */
-typedef enum {NUMBER, SYMBOL, STRING, CONS, FUNCTION, MACRO, BOOL} Type;
+typedef enum {NUMBER, SYMBOL, STRING, ERROR, CONS, FUNCTION, MACRO, BOOL} Type;
 
 /* The Cons cell structure used in the interpreter */
 typedef struct Cons {
@@ -295,6 +295,11 @@ static Object* symbol_new(char* symbol) {
     return obj;
 }
 
+/**
+ * Allocates a new string object on the heap
+ * @param str - a string to store in the string object
+ * @return - a reference to the string object
+ */
 static Object* string_new(char* str) {
     unsigned long len;
     Object* obj = object_new();
@@ -374,6 +379,11 @@ static Object* macro_new(struct Object* (*fn)(struct Object** args)) {
     return obj;
 }
 
+/**
+ * Allocates a new bool object on the heap
+ * @param value - a true/false value to store in the bool object
+ * @return - a reference to the bool object
+ */
 static Object* bool_new(char value) {
     Object* obj = object_new();
     obj->type = BOOL;
@@ -382,6 +392,20 @@ static Object* bool_new(char value) {
     } else {
         obj->data.num = 0;
     }
+    return obj;
+}
+
+/**
+ * Allocates a new error object on the heap
+ * @param str - a string to store in the error object
+ * @return - a reference to the error object
+ */
+static Object* error_new(char* str) {
+    Object* obj;
+
+    obj = symbol_new(str);
+    obj->type = ERROR;
+
     return obj;
 }
 
@@ -406,6 +430,10 @@ static void object_free(Object* obj) {
             break;
         }
         case SYMBOL: {
+            free(obj->data.str);
+            break;
+        }
+        case ERROR: {
             free(obj->data.str);
             break;
         }
@@ -611,6 +639,7 @@ static void fprint(FILE* fp, Object* obj) {
             break;
         }
         case STRING:
+        case ERROR:
         case SYMBOL: {
             fprintf(fp, "%s", obj->data.str);
             break;
@@ -749,10 +778,11 @@ static char is_string(char c) {
  * on the stack.
  * @param str - the input stream
  * @param buff - the provided buffer
- * @return - how many characters of the input stream were consumed
+ * @return - how many characters of the input stream were consumed or -1 if an error occurred during scanning
  */
-static char peek(char** str, char buff[]) {
+static Object* peek(char** str, char buff[]) {
 
+    Object* res;
     char* temp;
     char consumed;
     char c;
@@ -761,6 +791,7 @@ static char peek(char** str, char buff[]) {
     temp = *str;
     consumed = 0;
     c = *temp;
+    res = NULL;
 
     while (c != 0) {
 
@@ -816,6 +847,15 @@ static char peek(char** str, char buff[]) {
             *(buff++) = c;
             c = *(temp++);
             while (c != '"') {
+
+                if (c == '\n') {
+                    return error_new("syntax error: found EOL while scanning string\n");
+                }
+
+                if (c == EOF) {
+                    return error_new("syntax error: found EOF while scanning string\n");
+                }
+
                 consumed++;
                 *(buff++) = c;
                 c = *(temp++);
@@ -844,19 +884,22 @@ static char peek(char** str, char buff[]) {
 
     }
 
-    return consumed;
+    return number_new(consumed);
 
 }
 
 /**
- * Like peek() except it advances the input stream after
- * producing each token.
- * @param str - the input stream
- * @param buff - the buffer to contain the token
+ * Tests the type of an object, just a helper method to
+ * reduce some duplicated code.
+ * @param object - the object to test
+ * @param obj_type - the type to compare against
+ * @return - returns true if the object is of type 'obj_type'
  */
-static void next(char** str, char buff[]) {
-    char consumed = peek(str, buff);
-    *str += consumed;
+static char is_type(Object* object, Type obj_type) {
+    if (object != NULL) {
+        return (char) object->type == obj_type;
+    }
+    return 0;
 }
 
 /**
@@ -880,20 +923,6 @@ static char is_atom(char buff[]) {
 static char is_expr(char buff[]) {
     if (*buff == '\'' || *buff == '`' || *buff == ',' || *buff == '(' || is_atom(buff)) {
         return 1;
-    }
-    return 0;
-}
-
-/**
- * Tests the type of an object, just a helper method to
- * reduce some duplicated code.
- * @param object - the object to test
- * @param obj_type - the type to compare against
- * @return - returns true if the object is of type 'obj_type'
- */
-static char is_type(Object* object, Type obj_type) {
-    if (object != NULL) {
-        return (char) object->type == obj_type;
     }
     return 0;
 }
@@ -935,6 +964,22 @@ static char is_unquote(Object* obj) {
         }
     }
     return 0;
+}
+
+/**
+ * Like peek() except it advances the input stream after
+ * producing each token.
+ * @param str - the input stream
+ * @param buff - the buffer to contain the token
+ */
+static Object* next(char** str, char buff[]) {
+    Object* obj = peek(str, buff);
+    if (is_type(obj, NUMBER)) {
+        *str += obj->data.num;
+    } else if (is_type(obj, ERROR)) {
+        return obj;
+    }
+    return NULL;
 }
 
 static Map* push_local_environment(void) {
@@ -1061,6 +1106,8 @@ static char is_truthy(Object* obj) {
             case NUMBER:
             case BOOL:
                 return obj->data.num > 0;
+            case ERROR:
+                return 0;
             case SYMBOL:
             case STRING:
             case CONS:
@@ -1250,11 +1297,19 @@ static Object* list(char** str) {
     Object* temp;
     Object* prev;
     Object* obj = NULL;
+    Object* err;
+
     char buff[BUFF_SIZE] = {0};
-    next(str, buff);
-    
-    peek(str, buff);
-    
+    err = next(str, buff);
+    if (is_type(err, ERROR)) {
+        return err;
+    }
+
+    err = peek(str, buff);
+    if (is_type(err, ERROR)) {
+        return err;
+    }
+
     /* found an empty list which represents NULL/nil */
     if (strcmp(buff, ")") == 0) {
         next(str, buff);
@@ -1278,10 +1333,13 @@ static Object* list(char** str) {
      * the extra cons cell because we have garbage collection */
     prev->data.cons.cdr = NULL;
 
-    next(str, buff);
+    err = next(str, buff);
+    if (is_type(err, ERROR)) {
+        return err;
+    }
+    
     if (strcmp(buff, ")") != 0) {
-        fprintf(stderr, "syntax error: missing expected ')'\n");
-        return NULL;
+        return error_new("syntax error: missing expected ')'\n");
     }
     return obj;
 }
@@ -1405,8 +1463,13 @@ static void exec(Map* env, char* str) {
         obj = parse(&str);
         
         res = eval(env, obj);
-        /* Suppress nil in the REPL output */
-        if (res != NULL) {
+        /* Suppress nil in the REPL output,
+         print errors to stderr and regular objects
+         to stdout.
+         */
+        if (res != NULL && res->type == ERROR) {
+            fprint(stderr, res);
+        } else if (res != NULL) {
             print(res);
             printf("\n");
         }
@@ -1474,6 +1537,8 @@ Object* builtin_type(Object* args[]) {
             return string_new("\"symbol");
         case STRING:
             return string_new("\"string");
+        case ERROR:
+            return string_new("\"error");
         case FUNCTION:
             return string_new("\"function");
         case MACRO:
@@ -1501,18 +1566,20 @@ Object* builtin_import(Object* args[]) {
     char* filename;
     FILE *fp;
     char* str;
+    char error_buff[255];
+
     Object* import_path = args[0];
     if (import_path == NULL || import_path->type != STRING) {
-        fprintf(stderr, "import requires 1 parameter which must be a string.\n");
-        return NULL;
+        return error_new("import error: import requires 1 parameter which must be a string.\n");
     }
     
     /* Read file and evaluate each line */
     filename = import_path->data.str;
     fp = fopen(filename, "r");
     if (fp == NULL) {
-        fprintf(stderr, "import error: '%s' file not found\n", filename);
-        return NULL;
+        sprintf(error_buff, "import error: '%s' file not found\n", filename);
+        error_buff[254] = 0;
+        return error_new(error_buff);
     }
     
     str = read_string(fp);
