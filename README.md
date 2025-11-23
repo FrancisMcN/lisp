@@ -88,7 +88,7 @@ nil
 >
 ```
 
-The garbage collector is now automatically triggered after every 100 object allocations which is too frequent and too simple but it'll work for now.
+The garbage collector is triggered when the number of object allocations since the last collection exceeds the number of objects at the last collection by 25%.
 
 The interpreter can also execute multiple Lisp expressions in sequence and it can run programs directly from text files.
 ```lisp
