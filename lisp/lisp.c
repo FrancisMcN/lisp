@@ -6,7 +6,6 @@
 #define MAX_FUNC_ARGS 64
 #define INITIAL_ENV_SIZE 8
 #define MAX_ENV_COUNT 1024
-#define GC_INTERVAL 100
 
 /**
  * Converts a string to an integer
@@ -100,6 +99,7 @@ static Object* cdr(Object* obj);
  */
 typedef struct GC {
     Object* tail;
+    size_t objects_at_last_collection;
     size_t objects_since_last_collection;
     Map* env_stack[MAX_ENV_COUNT];
     size_t tos;
@@ -109,6 +109,7 @@ static GC* gc_new(Map* env) {
     size_t i;
     
     GC* gc = malloc(sizeof(GC));
+    gc->objects_at_last_collection = 0;
     gc->objects_since_last_collection = 0;
     for (i = 0; i < MAX_ENV_COUNT; i++) {
         gc->env_stack[i] = NULL;
@@ -149,6 +150,7 @@ static void gc_mark(GC* gc) {
     }
 
     printf("marked %lu objects out of %lu total objects.\n", count, total);
+    gc->objects_at_last_collection = total;
 
 }
 
@@ -1500,7 +1502,7 @@ static void exec(Map* env, char* str) {
             printf("\n");
         }
 
-        if (gc->objects_since_last_collection >= GC_INTERVAL) {
+        if (gc->objects_since_last_collection >= (gc->objects_at_last_collection * 1.25)) {
             gc_mark(gc);
             gc_sweep(gc);
         }
