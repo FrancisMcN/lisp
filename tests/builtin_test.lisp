@@ -48,3 +48,11 @@
     
 (deftest test_appending_non_lists_returns_error
     (assert (= (type (append '(a b c) 1 2 3)) "error")))
+
+(deftest test_macroexpand-1_only_expands_macro_once
+    (let (m2 (macro (y) `(+ ,y ,y)) m1 (macro (x) `(m2 ,x)))
+        (assert (= (macroexpand-1 '(m1 6)) '(m2 6)))))
+
+(deftest test_macroexpand_keeps_expanding_until_result_is_not_macro
+    (let (m2 (macro (y) `(+ ,y ,y)) m1 (macro (x) `(m2 ,x)))
+        (assert (= (macroexpand '(m1 6)) '(+ 6 6)))))

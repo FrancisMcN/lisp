@@ -1593,6 +1593,34 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
  * End of scanning and parsing functions
  */
 
+/**
+ * Performs one expansion of a macro, if the macro expands into another macro
+ * the second macro will be returned unexpanded.
+ * @param macro - the macro to be expanded once
+ * @return - the expanded macro
+ */
+static Object* macroexpand1(Object* macro) {
+    return eval_function_call(gc->env_stack[gc->tos], macro, 0);
+}
+
+/**
+ * Repeatedly expand the macro until the result is no longer a macro
+ * @param macro - the macro to be expanded
+ * @return - the expanded macro
+ */
+static Object* macroexpand(Object* macro) {
+    Object* expanded = macroexpand1(macro);
+    if (is_type(expanded, MACRO)) {
+        return macroexpand(expanded);
+    } else if (is_type(expanded, CONS)) {
+        Object* expanded_car = eval(gc->env_stack[gc->tos], car(expanded));
+        if (is_type(expanded_car, MACRO)) {
+            return macroexpand(expanded);
+        }
+    }
+    return expanded;
+}
+
 Object* builtin_car(Object* args[]) {
     return car(args[0]);
 }
@@ -1740,9 +1768,12 @@ Object* builtin_assert(Object* args[]) {
     return cons_new(symbol_new("if"), cons_new(args[0], cons_new(symbol_new("true"), cons_new(symbol_new("false"), NULL))));
 }
 
+Object* builtin_macroexpand1(Object* args[]) {
+    return macroexpand1(args[0]);
+}
+
 Object* builtin_macroexpand(Object* args[]) {
-    Object* macro = args[0];
-    return eval_function_call(gc->env_stack[gc->tos], macro, 0);
+    return macroexpand(args[0]);
 }
 
 Object* builtin_mark(Object* args[]) {
@@ -1841,6 +1872,7 @@ static void init_env(Map* env) {
     map_put(env, "assert", macro_new(builtin_assert));
     map_put(env, "deftest", macro_new(builtin_deftest));
     map_put(env, "macroexpand", function_new(builtin_macroexpand));
+    map_put(env, "macroexpand-1", function_new(builtin_macroexpand1));
 
     map_put(env, "gc-mark", function_new(builtin_mark));
     map_put(env, "gc-sweep", function_new(builtin_sweep));
