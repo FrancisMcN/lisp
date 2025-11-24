@@ -676,11 +676,23 @@ static Object* car(Object* obj) {
     return NULL;
 }
 
+static void setcar(Object* obj, Object* value) {
+    if (obj != NULL && obj->type == CONS) {
+        obj->data.cons.car = value;
+    }
+}
+
 static Object* cdr(Object* obj) {
     if (obj != NULL && obj->type == CONS) {
         return obj->data.cons.cdr;
     }
     return NULL;
+}
+
+static void setcdr(Object* obj, Object* value) {
+    if (obj != NULL && obj->type == CONS) {
+        obj->data.cons.cdr = value;
+    }
 }
 
 static void fprint(FILE* fp, Object* obj) {
@@ -1075,6 +1087,22 @@ static Object* eval_quote_special_form(Map* env, Object* obj) {
     return car(cdr(obj));
 }
 
+static Object* eval_unquote(Map* env, Object* obj) {
+
+    Object* temp = obj;
+
+    if (is_unquote(obj)) {
+        return eval(env, car(cdr(obj)));
+    }
+
+    while (is_type(temp, CONS)) {
+        setcar(temp, eval_unquote(env, car(temp)));
+        temp = cdr(temp);
+    }
+
+    return obj;
+}
+
 /**
  * Evaluates the quasiquote special form.
  * (quasiquote (a b c ,d) becomes (append (list (quote a)) (list (quote b)) (list (quote c)) (list d))
@@ -1094,15 +1122,11 @@ static Object* eval_quasiquote_special_form(Map* env, Object* obj) {
     res = cur;
     while (temp != NULL) {
 
-        Object* item = car(temp);
-        if (!is_unquote(item)) {
-            item = cons_new(symbol_new("quote"), cons_new(item, NULL));
-        } else {
-            item = car(cdr(item));
-        }
+        Object* item = eval_unquote(env, car(temp));
+        item = cons_new(symbol_new("quote"), cons_new(item, NULL));
 
-        cur->data.cons.car = cons_new(symbol_new("list"), cons_new(item, NULL));
-        cur->data.cons.cdr = cons_new(NULL, NULL);
+        setcar(cur, cons_new(symbol_new("list"), cons_new(item, NULL)));
+        setcdr(cur, cons_new(NULL, NULL));
         prev = cur;
         cur = cur->data.cons.cdr;
         temp = cdr(temp);
@@ -1116,7 +1140,8 @@ static Object* eval_quasiquote_special_form(Map* env, Object* obj) {
 static Object* eval_define_special_form(Map* env, Object* obj) {
     Object* name = car(cdr(obj));
     Object* value = car(cdr(cdr(obj)));
-    map_put(env, name->data.str, eval(env, value));
+    /* the define special form stores values in the root environment */
+    map_put(gc->env_stack[0], name->data.str, eval(env, value));
     return NULL;
 }
 
@@ -1132,7 +1157,8 @@ static Object* eval_let_special_form(Map* env, Object* obj) {
     let_body = car(cdr(cdr(obj)));
     while (temp != NULL) {
         Object* name = car(temp);
-        Object* value = car(cdr(temp));
+        Object* value = eval(env, car(cdr(temp)));
+
         map_put(local_env, name->data.str, value);
         temp = cdr(cdr(temp));
     }
@@ -1364,9 +1390,8 @@ static Object* list(char** str) {
     obj = temp;
     prev = temp;
     while (is_expr(buff)) {
-        temp->data.cons.car = expr(str);
-
-        temp->data.cons.cdr = cons_new(NULL, NULL);
+        setcar(temp, expr(str));
+        setcdr(temp, cons_new(NULL, NULL));
         prev = temp;
         temp = temp->data.cons.cdr;
 
@@ -1416,7 +1441,13 @@ static Object* atom(char** str) {
  */
 static Object* expr(char** str) {
     char buff[BUFF_SIZE] = {0};
-    peek(str, buff);
+    Object* err = NULL;
+
+    err = peek(str, buff);
+    if (is_type(err, ERROR)) {
+        return err;
+    }
+
     if (strcmp(buff, "'") == 0) {
        /* found a shorthand quote */
         return quote(str);
@@ -1513,6 +1544,7 @@ static void exec(Map* env, char* str) {
          */
         if (res != NULL && res->type == ERROR) {
             fprint(stderr, res);
+            break;
         } else if (res != NULL) {
             print(res);
             printf("\n");
@@ -1565,8 +1597,18 @@ Object* builtin_car(Object* args[]) {
     return car(args[0]);
 }
 
+Object* builtin_setcar(Object* args[]) {
+    setcar(args[0], args[1]);
+    return NULL;
+}
+
 Object* builtin_cdr(Object* args[]) {
     return cdr(args[0]);
+}
+
+Object* builtin_setcdr(Object* args[]) {
+    setcdr(args[0], args[1]);
+    return NULL;
 }
 
 Object* builtin_type(Object* args[]) {
@@ -1615,8 +1657,8 @@ Object* builtin_list(Object* args[]) {
     Object* list = temp;
     Object* prev = temp;
     while (args[i] != NULL) {
-        temp->data.cons.car = args[i];
-        temp->data.cons.cdr = cons_new(NULL, NULL);
+        setcar(temp, args[i]);
+        setcdr(temp, cons_new(NULL, NULL));
         prev = temp;
         temp = temp->data.cons.cdr;
         i++;
@@ -1653,8 +1695,8 @@ Object* builtin_append(Object* args[]) {
             return error_new(error_buff);
         }
         while (temp != NULL) {
-            cur->data.cons.car = car(temp);
-            cur->data.cons.cdr = cons_new(NULL, NULL);
+            setcar(cur, car(temp));
+            setcdr(cur, cons_new(NULL, NULL));
             prev = cur;
             cur = cur->data.cons.cdr;
             temp = cdr(temp);
@@ -1783,7 +1825,9 @@ static void init_env(Map* env) {
     map_put(env, "false", bool_new(0));
 
     map_put(env, "car", function_new(builtin_car));
+    map_put(env, "setcar", function_new(builtin_setcar));
     map_put(env, "cdr", function_new(builtin_cdr));
+    map_put(env, "setcdr", function_new(builtin_setcdr));
     map_put(env, "type", function_new(builtin_type));
     map_put(env, "cons", function_new(builtin_cons));
     map_put(env, "print", function_new(builtin_print));

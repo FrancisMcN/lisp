@@ -4,6 +4,14 @@
     (let (x "hello")
         (assert (= x "hello"))))
 
+(deftest test_let_special_form_evaluates_values
+    (do (let (x (+ 1 2 3))
+        (assert (= x 6)))))
+
+(deftest test_define_inside_let_is_accessible_outside_let
+    (do (let (x 10) (define y 20))
+        (assert (= y 20))))
+
 (deftest test_multiple_values_can_be_set_using_let
     (let (a 5 b 7)
         (assert (= (+ a b) 12))))
@@ -20,3 +28,7 @@
 (deftest test_quasiquote_symbols_can_be_unquoted
     (let (c 5)
         (assert (= `(a b ,c) '(a b 5)))))
+
+(deftest test_recursive_unquoting_for_nested_forms
+    (let (x 5)
+        (assert (= `(do (print (+ ,x ,x x ,x))) '(do (print (+ 5 5 x 5)))))))
