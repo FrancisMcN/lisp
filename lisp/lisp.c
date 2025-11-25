@@ -919,11 +919,11 @@ static Object* peek(char** str, char buff[]) {
             while (c != '"') {
 
                 if (c == '\n') {
-                    return error_new("syntax error: found EOL while scanning string\n");
+                    return error_new("syntax error: found EOL while scanning string");
                 }
 
                 if (c == EOF) {
-                    return error_new("syntax error: found EOF while scanning string\n");
+                    return error_new("syntax error: found EOF while scanning string");
                 }
 
                 consumed++;
@@ -1479,6 +1479,13 @@ Object* eval(Map* env, Object* obj) {
     if (obj != NULL) {
         switch (obj->type) {
             case SYMBOL: {
+                /* if a symbol begins with : it's a keyword,
+                 * keywords evaluate to themselves.
+                 */
+                if (obj->data.str[0] == ':') {
+                    res = obj;
+                    break;
+                }
                 size_t i = gc->tos;
                 while (res == NULL && (0 <= i && i <= MAX_ENV_COUNT)) {
                     res = map_get(gc->env_stack[i], obj->data.str);
@@ -1544,6 +1551,7 @@ static void exec(Map* env, char* str) {
          */
         if (res != NULL && res->type == ERROR) {
             fprint(stderr, res);
+            printf("\n");
             break;
         } else if (res != NULL) {
             print(res);
@@ -1661,7 +1669,7 @@ Object* builtin_import(Object* args[]) {
 
     Object* import_path = args[0];
     if (import_path == NULL || import_path->type != STRING) {
-        return error_new("import error: import requires 1 parameter which must be a string.\n");
+        return error_new("import error: import requires 1 parameter which must be a string.");
     }
     
     /* Read file and evaluate each line */
@@ -1718,7 +1726,7 @@ Object* builtin_append(Object* args[]) {
     while (args[i] != NULL) {
         Object* temp = args[i];
         if (!is_type(temp, CONS)) {
-            sprintf(error_buff, "type error: append expects each argument to be a list but argument %lu is a %s.\n", i, type(temp)->data.str);
+            sprintf(error_buff, "type error: append expects each argument to be a list but argument %lu is a %s.", i, type(temp)->data.str);
             error_buff[254] = 0;
             return error_new(error_buff);
         }
@@ -1734,6 +1742,14 @@ Object* builtin_append(Object* args[]) {
     prev->data.cons.cdr = NULL;
     
     return res;
+}
+
+Object* builtin_error(Object* args[]) {
+    Object* arg = args[0];
+    if (arg != NULL) {
+        return error_new(arg->data.str);
+    }
+    return error_new("error");
 }
 
 /* func is macro that just combines 'define' and 'lambda' to
@@ -1866,6 +1882,7 @@ static void init_env(Map* env) {
     map_put(env, "list", function_new(builtin_list));
     map_put(env, "read", function_new(builtin_read));
     map_put(env, "append", function_new(builtin_append));
+    map_put(env, "error", function_new(builtin_error));
     
     map_put(env, "func", macro_new(builtin_func));
     map_put(env, "defmacro", macro_new(builtin_defmacro));
