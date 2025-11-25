@@ -15,6 +15,12 @@
 (deftest test_symbol_is_symbol
     (assert (= (type (quote abc)) "symbol")))
 
+(deftest test_keyword_is_symbol
+    (assert (= (type :my-keyword) "symbol")))
+
+(deftest test_error_is_error
+    (assert (= (type (error "my error")) "error")))
+
 (deftest test_list_is_cons
     (assert (= (type (list 1 2 3 4)) "cons")))
 
