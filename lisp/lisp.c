@@ -1888,6 +1888,19 @@ static char is_greater_than(Object* a, Object* b) {
     return 0;
 }
 
+static char is_less_than(Object* a, Object* b) {
+    if (a != NULL && b != NULL && a->type == b->type) {
+        switch (a->type) {
+            case NUMBER:
+                return a->data.num < b->data.num;
+            default:
+                return 0;
+        }
+    }
+    
+    return 0;
+}
+
 Object* builtin_equal(Object* args[]) {
     
     return bool_new(is_equal(args[0], args[1]));
@@ -1897,6 +1910,12 @@ Object* builtin_equal(Object* args[]) {
 Object* builtin_greater_than(Object* args[]) {
     
     return bool_new(is_greater_than(args[0], args[1]));
+    
+}
+
+Object* builtin_less_than(Object* args[]) {
+    
+    return bool_new(is_less_than(args[0], args[1]));
     
 }
 
@@ -1924,6 +1943,38 @@ Object* builtin_minus(Object* args[]) {
     while (args[i] != NULL) {
         Object* arg = args[i];
         temp -= arg->data.num;
+        i++;
+    }
+
+    return number_new(temp);
+}
+
+Object* builtin_multiply(Object* args[]) {
+
+    int temp = 0;
+    int i = 1;
+    
+    temp = args[0]->data.num;
+
+    while (args[i] != NULL) {
+        Object* arg = args[i];
+        temp *= arg->data.num;
+        i++;
+    }
+
+    return number_new(temp);
+}
+
+Object* builtin_divide(Object* args[]) {
+
+    int temp = 0;
+    int i = 1;
+    
+    temp = args[0]->data.num;
+
+    while (args[i] != NULL) {
+        Object* arg = args[i];
+        temp /= arg->data.num;
         i++;
     }
 
@@ -1962,8 +2013,11 @@ static void init_env(Map* env) {
 
     map_put(env, "=", function_new(builtin_equal));
     map_put(env, ">", function_new(builtin_greater_than));
+    map_put(env, "<", function_new(builtin_less_than));
     map_put(env, "+", function_new(builtin_plus));
     map_put(env, "-", function_new(builtin_minus));
+    map_put(env, "*", function_new(builtin_multiply));
+    map_put(env, "/", function_new(builtin_divide));
     
     exec(env, "(import \"lib/iteration.lisp\")");
 

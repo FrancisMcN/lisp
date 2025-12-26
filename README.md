@@ -112,6 +112,25 @@ The `let` special form is supported too. You can use the let special form to cre
     (do (+ x y)))
 ```
 
+There are two macros to support looping, `dowhile` and `dotimes`. `dotimes` is used to loop for a specified number of iterations and `dowhile` will loop until the condition is false.
+```lisp
+> (dotimes (print "hello") 5)
+hello
+hello
+hello
+hello
+hello
+>
+> (define x 5)
+> (dowhile (> x 0) (do (print x) (define x (- x 1))))
+5
+4
+3
+2
+1
+>
+```
+
 User-defined functions are now supported using the built-in `lambda` special form. You can either assign the function to a symbol or you can call it directly.
 ```lisp
 > ((lambda (name) (print name)) "francis")
