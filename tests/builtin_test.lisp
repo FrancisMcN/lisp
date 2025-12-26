@@ -56,3 +56,19 @@
 (deftest test_macroexpand_keeps_expanding_until_result_is_not_macro
     (let (m2 (macro (y) `(+ ,y ,y)) m1 (macro (x) `(m2 ,x)))
         (assert (= (macroexpand '(m1 6)) '(+ 6 6)))))
+
+(deftest test_dotimes_runs_code_multiple_times
+    (do (define x 0)
+        (dotimes (define x (+ x 1)) 5)
+        (assert (= x 5))))
+
+(deftest test_dowhile_only_runs_code_when_condition_is_true
+    (do (define y 0)
+        (dowhile false (define y (+ y 1)))
+        (assert (= y 0))))
+
+(deftest test_dowhile_runs_code_while_condition_is_true
+    (do (define x 10)
+        (dowhile (> x 5) (do
+            (define x (- x 1))))
+        (assert (= x 5))))
