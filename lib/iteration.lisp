@@ -16,13 +16,11 @@
 ;; 'body' repeatedly until 'condition' is false. The repetition
 ;; is achieved using recursion.
 (func recursive-dowhile (condition body)
-    (do
     (if (= (eval condition) true)
         (do (eval body)
-            (recursive-dowhile condition body)))))
+            (recursive-dowhile condition body))))
 
 ;; dowhile is a macro which just wraps around the recursive-dowhile
 ;; function to make the interface better
 (defmacro dowhile (condition body)
-    (do
-    `(recursive-dowhile (quote ,condition) (quote ,body))))
+    `(recursive-dowhile (quote ,condition) (quote ,body)))
