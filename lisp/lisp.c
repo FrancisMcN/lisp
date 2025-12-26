@@ -64,6 +64,7 @@ static Object* function_new(struct Object* (*fn)(struct Object** args));
 static Object* bool_new(char value);
 
 static void print(Object* obj);
+static Object* copy(Object* obj);
 
 /**
  * Each hash table is an array of MapEntry's. The hash table needs to store
@@ -1117,9 +1118,14 @@ static Object* eval_quasiquote_special_form(Map* env, Object* obj) {
     Object* prev;
 
     temp = car(cdr(obj));
+    /* soft copy the list because evaluating unquote modifies the list
+     in place, so we have to soft copy the list before modifying it */
+    temp = copy(temp);
+
     cur = cons_new(NULL, NULL);
     prev = cur;
     res = cur;
+
     while (temp != NULL) {
 
         Object* item = eval_unquote(env, car(temp));
@@ -1571,6 +1577,7 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
     Object* first;
     Object* obj;
     size_t test_no;
+    Map* local_env;
     printf("=== testing (%s) ===\n", filename);
     
     test_no = 0;
@@ -1582,7 +1589,9 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
         first = car(obj);
         if (first != NULL && strcmp(first->data.str, "deftest") == 0) {
             Object* test_name = car(cdr(obj));
-            obj = eval(env, obj);
+            local_env = push_local_environment();
+            obj = eval(local_env, obj);
+            pop_local_environment();
             if (obj != NULL && obj->type == BOOL && obj->data.num == 1) {
                 printf("PASS ");
                 (*pass_count)++;
@@ -1592,6 +1601,7 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
             }
             printf("%s\n", test_name->data.str);
             test_no++;
+
         }
         
     }
@@ -1627,6 +1637,38 @@ static Object* macroexpand(Object* macro) {
         }
     }
     return expanded;
+}
+
+/**
+ * Performs a recursive soft copy of list
+ * @param obj - the object to soft copy
+ * @return - the copied list
+ */
+static Object* copy(Object* obj) {
+    Object* cons;
+    Object* prev;
+    Object* temp;
+    Object* res;
+
+    cons = cons_new(NULL, NULL);
+    prev = cons;
+    res = cons;
+    temp = obj;
+
+    while (is_type(temp, CONS)) {
+        if (is_type(car(temp), CONS)) {
+            setcar(cons, copy(car(temp)));
+        } else {
+            setcar(cons, car(temp));
+        }
+        setcdr(cons, cons_new(NULL, NULL));
+        prev = cons;
+        cons = cdr(cons);
+        temp = cdr(temp);
+    }
+    setcdr(prev, NULL);
+    return res;
+
 }
 
 Object* builtin_car(Object* args[]) {
@@ -1752,6 +1794,10 @@ Object* builtin_error(Object* args[]) {
     return error_new("error");
 }
 
+Object* builtin_copy(Object* args[]) {
+    return copy(args[0]);
+}
+
 /* func is macro that just combines 'define' and 'lambda' to
  * create named functions */
 Object* builtin_func(Object* args[]) {
@@ -1829,9 +1875,28 @@ static char is_equal(Object* a, Object* b) {
     return 0;
 }
 
+static char is_greater_than(Object* a, Object* b) {
+    if (a != NULL && b != NULL && a->type == b->type) {
+        switch (a->type) {
+            case NUMBER:
+                return a->data.num > b->data.num;
+            default:
+                return 0;
+        }
+    }
+    
+    return 0;
+}
+
 Object* builtin_equal(Object* args[]) {
     
     return bool_new(is_equal(args[0], args[1]));
+    
+}
+
+Object* builtin_greater_than(Object* args[]) {
+    
+    return bool_new(is_greater_than(args[0], args[1]));
     
 }
 
@@ -1883,6 +1948,7 @@ static void init_env(Map* env) {
     map_put(env, "read", function_new(builtin_read));
     map_put(env, "append", function_new(builtin_append));
     map_put(env, "error", function_new(builtin_error));
+    map_put(env, "copy", function_new(builtin_copy));
     
     map_put(env, "func", macro_new(builtin_func));
     map_put(env, "defmacro", macro_new(builtin_defmacro));
@@ -1895,8 +1961,11 @@ static void init_env(Map* env) {
     map_put(env, "gc-sweep", function_new(builtin_sweep));
 
     map_put(env, "=", function_new(builtin_equal));
+    map_put(env, ">", function_new(builtin_greater_than));
     map_put(env, "+", function_new(builtin_plus));
     map_put(env, "-", function_new(builtin_minus));
+    
+    exec(env, "(import \"lib/iteration.lisp\")");
 
 }
 
