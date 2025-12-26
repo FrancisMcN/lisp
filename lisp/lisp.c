@@ -1001,7 +1001,6 @@ static char is_special_form(Object* cons) {
             strcmp(sym, "macro") == 0 ||
             strcmp(sym, "do") == 0 ||
             strcmp(sym, "let") == 0 ||
-            strcmp(sym, "set") == 0 ||
             strcmp(sym, "if") == 0) {
             return 1;
             }
@@ -1177,26 +1176,6 @@ static Object* eval_let_special_form(Map* env, Object* obj) {
     return res;
 }
 
-static Object* eval_set_special_form(Map* env, Object* obj) {
-    Object* temp;
-    Object* let_body;
-    Object* res;
-
-    temp = car(cdr(obj));
-    let_body = car(cdr(cdr(obj)));
-    while (temp != NULL) {
-        Object* name = car(temp);
-        Object* value = eval(env, car(cdr(temp)));
-
-        map_put(env, name->data.str, value);
-        temp = cdr(cdr(temp));
-    }
-
-    res = eval(env, let_body);
-
-    return res;
-}
-
 static char is_truthy(Object* obj) {
     if (obj != NULL) {
         switch (obj->type) {
@@ -1288,9 +1267,6 @@ static Object* eval_special_form(Map* env, Object* obj) {
     }
     if (strcmp(first->data.str, "let") == 0) {
         return eval_let_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "set") == 0) {
-        return eval_set_special_form(env, obj);
     }
     if (strcmp(first->data.str, "if") == 0) {
         return eval_if_special_form(env, obj);
@@ -1601,7 +1577,6 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
     Object* first;
     Object* obj;
     size_t test_no;
-    char failed;
     Map* local_env;
     printf("=== testing (%s) ===\n", filename);
     
@@ -1620,20 +1595,12 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
             if (obj != NULL && obj->type == BOOL && obj->data.num == 1) {
                 printf("PASS ");
                 (*pass_count)++;
-                failed = 0;
             } else {
                 printf("FAIL ");
                 (*fail_count)++;
-                failed = 1;
             }
             printf("%s\n", test_name->data.str);
             test_no++;
-
-            if (failed) {
-                printf("ERROR: ");
-                print(obj);
-                printf("\n");
-            }
 
         }
         
@@ -1672,6 +1639,11 @@ static Object* macroexpand(Object* macro) {
     return expanded;
 }
 
+/**
+ * Performs a recursive soft copy of list
+ * @param obj - the object to soft copy
+ * @return - the copied list
+ */
 static Object* copy(Object* obj) {
     Object* cons;
     Object* prev;
