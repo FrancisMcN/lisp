@@ -32,6 +32,7 @@ typedef struct Cons {
 typedef struct Function {
     char is_user_defined;
     char is_macro;
+    char rest_arg;
     struct Object* args;
     struct Object* body;
     struct Object* (*fn)(struct Object** args);
@@ -65,6 +66,8 @@ static Object* bool_new(char value);
 
 static void print(Object* obj);
 static Object* copy(Object* obj);
+static int length(Object* obj);
+static int find(Object* obj, Object* list);
 
 /**
  * Each hash table is an array of MapEntry's. The hash table needs to store
@@ -361,11 +364,16 @@ static Object* cons_new(Object* car, Object* cdr) {
 
 static Object* user_defined_function_new(Object* args, Object* body) {
     Function f;
+    Object* temp;
     Object* obj = object_new();
     obj->type = FUNCTION;
     
     f.is_user_defined = 1;
     f.is_macro = 0;
+
+    temp = args;
+
+    f.rest_arg = find(symbol_new("&"), args);
     f.args = args;
     f.body = body;
     f.fn = NULL;
@@ -380,6 +388,8 @@ static Object* user_defined_macro_new(Object* args, Object* body) {
     obj->type = MACRO;
     f.is_user_defined = 1;
     f.is_macro = 1;
+
+    f.rest_arg = find(symbol_new("&"), args);
     f.args = args;
     f.body = body;
     f.fn = NULL;
@@ -393,6 +403,7 @@ static Object* function_new(struct Object* (*fn)(struct Object** args)) {
     obj->type = FUNCTION;
     f.is_user_defined = 0;
     f.is_macro = 0;
+    f.rest_arg = -1;
     f.args = NULL;
     f.body = NULL;
     f.fn = fn;
@@ -406,6 +417,7 @@ static Object* macro_new(struct Object* (*fn)(struct Object** args)) {
     obj->type = MACRO;
     f.is_user_defined = 0;
     f.is_macro = 1;
+    f.rest_arg = -1;
     f.args = NULL;
     f.body = NULL;
     f.fn = fn;
@@ -660,6 +672,33 @@ static void map_free(Map* map) {
 Object* eval(Map* env, Object* obj);
 static void init_env(Map* env);
 
+static char is_equal(Object* a, Object* b) {
+    if (a != NULL && b != NULL && a->type == b->type) {
+        switch (a->type) {
+            case NUMBER:
+                return a->data.num == b->data.num;
+            case STRING:
+                return strcmp(a->data.str, b->data.str) == 0;
+            case SYMBOL:
+                return strcmp(a->data.str, b->data.str) == 0;
+            case CONS: {
+                if (is_equal(car(a), car(b))) {
+                    return is_equal(cdr(a), cdr(b));
+                }
+                return 0;
+            }
+            default:
+                return a->data.num == b->data.num;
+        }
+    }
+
+    if (a == NULL && b == NULL) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static Object* type(Object* obj) {
     if (obj == NULL) {
         return string_new("\"nil");
@@ -710,6 +749,48 @@ static void setcdr(Object* obj, Object* value) {
     if (obj != NULL && obj->type == CONS) {
         obj->data.cons.cdr = value;
     }
+}
+
+/**
+ * Calculates the length of a list
+ * @param obj - the list to determine the length of
+ * @return - the length of the list
+ */
+static int length(Object* obj) {
+    int length;
+    Object* temp;
+
+    length = 0;
+    temp = obj;
+
+    if (temp != NULL) {
+        while (is_type(temp, CONS)) {
+            length++;
+            temp = cdr(temp);
+        }
+    }
+    return length;
+}
+
+/**
+ * Determines whether an object is contained within a list
+ * @param obj - the object to find
+ * @return - the position of the object or -1 if not found
+ */
+static int find(Object* obj, Object* list) {
+    int i;
+    Object* temp;
+
+    temp = list;
+    i = 0;
+    while (temp != NULL) {
+        if (is_equal(obj, car(temp))) {
+            return i;
+        }
+        temp = cdr(temp);
+        i++;
+    }
+    return -1;
 }
 
 static void fprint(FILE* fp, Object* obj) {
@@ -1297,24 +1378,35 @@ static Object* eval_special_form(Map* env, Object* obj) {
  * @return - the result of evaluating the function
  */
 static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
-    int i;
-    Object* arg;
-    Object* temp;
-    Object* result = NULL;
-    Object* function = eval(env, car(obj));
-    Object* args[MAX_FUNC_ARGS] = {0};
 
+    Object* function;
+    Object* temp;
+    Object* args;
+    Object* arg;
+    Object* arg_array[MAX_FUNC_ARGS] = {0};
+    Object* rest;
+    Object* prev;
+    Object* result;
+    int i;
+    int arg_count;
+    int rest_arg;
+    char error_buff[255];
+
+    function = eval(env, car(obj));
+    
     if (function == NULL) {
-        fprintf(stderr, "function '");
-        fprint(stderr, car(obj));
-        fprintf(stderr, "' is undefined.\n");
-        return NULL;
+        sprintf(error_buff, "name error: function '%s' is undefined", car(obj)->data.str);
+        error_buff[254] = 0;
+        return error_new(error_buff);
     }
 
-    temp = obj;
+    args = cdr(obj);
+    arg_count = length(args);
+    rest_arg = function->data.fn.rest_arg;
+
+    temp = args;
     i = 0;
     while (car(temp) != NULL) {
-        temp = cdr(temp);
         
         /* Don't evaluate args if the function is a macro */
         if (!function->data.fn.is_macro) {
@@ -1322,20 +1414,38 @@ static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
         } else {
             arg = car(temp);
         }
-        args[i++] = arg;
 
+        arg_array[i++] = arg;
+        temp = cdr(temp);
+    }
+
+    if (rest_arg != -1) {
+        rest = cons_new(NULL, NULL);
+        temp = rest;
+        prev = temp;
+        i = rest_arg;
+        while (i > 0 && i < arg_count) {
+            setcar(temp, arg_array[i]);
+            setcdr(temp, cons_new(NULL, NULL));
+            arg_array[i] = NULL;
+            prev = temp;
+            temp = cdr(temp);
+            i++;
+        }
+        setcdr(prev, NULL);
+        arg_array[rest_arg] = rest;
     }
     
     if (!function->data.fn.is_user_defined) {
-        result = function->data.fn.fn(args);
+        result = function->data.fn.fn(arg_array);
     } else {
-        result = function_wrapper(function, args);
+        result = function_wrapper(function, arg_array);
     }
-    
+
     if (expand_macro && function->data.fn.is_macro) {
         result = eval(env, result);
     }
-    
+
     return result;
 }
 
@@ -1817,6 +1927,20 @@ Object* builtin_copy(Object* args[]) {
     return copy(args[0]);
 }
 
+Object* builtin_len(Object* args[]) {
+    return number_new(length(args[0]));
+}
+
+Object* builtin_find(Object* args[]) {
+    int pos;
+    pos = find(args[0], args[1]);
+    
+    if (pos > -1) {
+        return number_new(pos);
+    }
+    return NULL;
+}
+
 /* func is macro that just combines 'define' and 'lambda' to
  * create named functions */
 Object* builtin_func(Object* args[]) {
@@ -1865,33 +1989,6 @@ Object* builtin_mark(Object* args[]) {
 Object* builtin_sweep(Object* args[]) {
     gc_sweep(gc);
     return NULL;
-}
-
-static char is_equal(Object* a, Object* b) {
-    if (a != NULL && b != NULL && a->type == b->type) {
-        switch (a->type) {
-            case NUMBER:
-                return a->data.num == b->data.num;
-            case STRING:
-                return strcmp(a->data.str, b->data.str) == 0;
-            case SYMBOL:
-                return strcmp(a->data.str, b->data.str) == 0;
-            case CONS: {
-                if (is_equal(car(a), car(b))) {
-                    return is_equal(cdr(a), cdr(b));
-                }
-                return 0;
-            }
-            default:
-                return a->data.num == b->data.num;
-        }
-    }
-    
-    if (a == NULL && b == NULL) {
-        return 1;
-    }
-    
-    return 0;
 }
 
 static char is_greater_than(Object* a, Object* b) {
@@ -2019,6 +2116,8 @@ static void init_env(Map* env) {
     map_put(env, "append", function_new(builtin_append));
     map_put(env, "error", function_new(builtin_error));
     map_put(env, "copy", function_new(builtin_copy));
+    map_put(env, "len", function_new(builtin_len));
+    map_put(env, "find", function_new(builtin_find));
     
     map_put(env, "func", macro_new(builtin_func));
     map_put(env, "defmacro", macro_new(builtin_defmacro));
