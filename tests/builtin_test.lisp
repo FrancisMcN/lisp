@@ -96,3 +96,19 @@
         (dowhile (> x 5) (do
             (define x (- x 1))))
         (assert (= x 5))))
+
+(deftest test_len_returns_the_length_of_a_list
+    (let (x '(a b c d e f))
+        (assert (= (len x) 6))))
+        
+(deftest test_len_returns_zero_for_empty_list
+    (let (x '())
+        (assert (= (len x) 0))))
+
+(deftest test_find_returns_position_of_object_in_list
+    (let (x '(a b c d e f))
+        (assert (= (find 'c x) 2))))
+
+(deftest test_find_returns_nil_if_object_not_in_list
+    (let (x '(a b c d e f))
+        (assert (= (find 'missing x) nil))))
