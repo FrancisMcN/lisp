@@ -233,6 +233,7 @@ static void gc_sweep(GC* gc) {
             count++;
 
         } else {
+            ptr->marked = 0;
             ptr = ptr->prev;
         }
 
@@ -535,10 +536,17 @@ static void map_resize(Map* map) {
         }
     }
     
+    MapEntry* data = new_map->data;
+    size_t size = new_map->size;
+    size_t used = new_map->used;
+
     free(map->data);
-    map->size = new_map->size;
-    map->data = new_map->data;
-    map->used = new_map->used;
+
+    map->data = data;
+    map->size = size;
+    map->used = used;
+
+    free(new_map);
     
 }
 
@@ -559,7 +567,7 @@ static void map_put(Map* map, char* key, Object* obj) {
         map_resize(map);
     }
 
-    key_hash = hash(key) % (map->size - 1);
+    key_hash = hash(key) % (map->size);
     if (map->data[key_hash].key == NULL) {
         /* Found a free space in the hash table, store the data in the map entry */
         char* map_key = malloc(sizeof(char) * key_len + 1);
@@ -602,7 +610,7 @@ static void map_put(Map* map, char* key, Object* obj) {
 static Object* map_get(Map* map, char* key) {
 
     size_t key_hash = hash(key);
-    key_hash = key_hash  % (map->size - 1);
+    key_hash = key_hash  % (map->size);
     if (map->data[key_hash].key != NULL) {
         if (strcmp(map->data[key_hash].key, key) == 0) {
             /* Found the item, return the object */
@@ -633,7 +641,15 @@ static Object* map_get(Map* map, char* key) {
  * @param map - the table whose memory should be deallocated
  */
 static void map_free(Map* map) {
+    
+    size_t i;
+    
     if (map != NULL) {
+        
+        for (i = 0; i < map->size; i++) {
+            free(map->data[i].key);
+        }
+        
         free(map->data);
         free(map);
     }
@@ -1227,7 +1243,7 @@ static Object* eval_macro_special_form(Map* env, Object* obj) {
 static Object* eval_do_special_form(Map* env, Object* obj) {
     
     Object* res = NULL;
-    Object* temp = obj;
+    Object* temp = cdr(obj);
     while (car(temp) != NULL) {
         res = eval(env, car(temp));
         temp = cdr(temp);
@@ -1481,6 +1497,7 @@ Object* read(char* str) {
 }
 
 Object* eval(Map* env, Object* obj) {
+    size_t i;
     Object* res = NULL;
     if (obj != NULL) {
         switch (obj->type) {
@@ -1492,10 +1509,12 @@ Object* eval(Map* env, Object* obj) {
                     res = obj;
                     break;
                 }
-                size_t i = gc->tos;
-                while (res == NULL && (0 <= i && i <= MAX_ENV_COUNT)) {
+
+                for (i = gc->tos + 1; i-- > 0; ) {
                     res = map_get(gc->env_stack[i], obj->data.str);
-                    i--;
+                    if (res != NULL) {
+                        break;
+                    }
                 }
                 break;
             }
