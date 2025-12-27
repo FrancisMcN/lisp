@@ -11,3 +11,7 @@
 (deftest test_params_after_rest_param_are_nil
     (do ((lambda (a & c)
         (assert (= c nil))) 1 2 3 4)))
+        
+(deftest test_params_after_rest_param_are_nil
+    (do ((lambda (&)
+        (assert (= & '(1 2 3 4)))) 1 2 3 4)))

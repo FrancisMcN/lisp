@@ -367,17 +367,14 @@ static Object* user_defined_function_new(Object* args, Object* body) {
     Object* temp;
     Object* obj = object_new();
     obj->type = FUNCTION;
-    
     f.is_user_defined = 1;
     f.is_macro = 0;
 
     temp = args;
-
     f.rest_arg = find(symbol_new("&"), args);
     f.args = args;
     f.body = body;
     f.fn = NULL;
-    
     obj->data.fn = f;
     return obj;
 }
@@ -1424,7 +1421,7 @@ static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
         temp = rest;
         prev = temp;
         i = rest_arg;
-        while (i > 0 && i < arg_count) {
+        while (i >= 0 && i < arg_count) {
             setcar(temp, arg_array[i]);
             setcdr(temp, cons_new(NULL, NULL));
             arg_array[i] = NULL;
