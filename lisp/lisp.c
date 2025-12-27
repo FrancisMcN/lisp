@@ -1508,7 +1508,7 @@ Object* eval(Map* env, Object* obj) {
                     res = obj;
                     break;
                 }
-                ssize_t i = gc->tos;
+                size_t i = gc->tos;
                 for (i = gc->tos; i >= 0; i--) {
                     res = map_get(gc->env_stack[i], obj->data.str);
                     if (res) break;
