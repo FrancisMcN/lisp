@@ -112,7 +112,7 @@ The `let` special form is supported too. You can use the let special form to cre
     (do (+ x y)))
 ```
 
-There are two macros to support looping, `dowhile` and `dotimes`. `dotimes` is used to loop for a specified number of iterations and `dowhile` will loop until the condition is false.
+There are two macros to support looping, `dowhile` and `dotimes`. `dotimes` is used to loop for a specified number of iterations.
 ```lisp
 > (dotimes (print "hello") 5)
 hello
@@ -120,7 +120,9 @@ hello
 hello
 hello
 hello
->
+```
+`dowhile` will loop until the condition is false.
+```lisp
 > (define x 5)
 > (dowhile (> x 0) (do (print x) (define x (- x 1))))
 5
@@ -128,10 +130,9 @@ hello
 3
 2
 1
->
 ```
 
-User-defined functions are now supported using the built-in `lambda` special form. You can either assign the function to a symbol or you can call it directly.
+User-defined functions are supported using the built-in `lambda` special form. You can either assign the function to a symbol or you can call it directly.
 ```lisp
 > ((lambda (name) (print name)) "francis")
 francis
@@ -141,6 +142,22 @@ Below is an example showing how to assign a name to a function.
 > (define double (lambda (a) (+ a a)))
 > (double 10)
 20
+```
+
+Variadic functions are supported too by using the `&` symbol as the final parameter in the function definition.
+```lisp
+(func f (a b c &)
+    (do (print a)
+        (print b)
+        (print c)
+        (print &)))
+```
+```lisp
+> (f 1 2 3 4 5 6 7)
+1
+2
+3
+(4 5 6 7)
 ```
 
 Unit tests can be written using the special `deftest` macro. Currently this macro just expands to a function definition and a function call. An example unit test proving a list of of type `cons` is shown below.
