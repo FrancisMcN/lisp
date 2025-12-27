@@ -1497,6 +1497,7 @@ Object* read(char* str) {
 }
 
 Object* eval(Map* env, Object* obj) {
+    size_t i;
     Object* res = NULL;
     if (obj != NULL) {
         switch (obj->type) {
@@ -1508,10 +1509,12 @@ Object* eval(Map* env, Object* obj) {
                     res = obj;
                     break;
                 }
-                size_t i = gc->tos;
-                for (i = gc->tos; i >= 0; i--) {
+
+                for (i = gc->tos + 1; i-- > 0; ) {
                     res = map_get(gc->env_stack[i], obj->data.str);
-                    if (res) break;
+                    if (res != NULL) {
+                        break;
+                    }
                 }
                 break;
             }
