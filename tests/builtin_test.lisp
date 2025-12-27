@@ -17,6 +17,30 @@
     
 (deftest test_minus_subtracts_correctly
     (assert (= (- 1 2 3 4 5) -13)))
+    
+(deftest test_multiply_multiplies_correctly
+    (assert (= (* 1 2 3 4 5) 120)))
+    
+(deftest test_divide_divides_correctly
+    (assert (= (/ 100 20) 5)))
+    
+(deftest test_greater_than_first_param_is_greater_than_second
+    (assert (= (> 20 10) true)))
+    
+(deftest test_greater_than_second_param_is_greater_than_first
+    (assert (= (> 10 20) false)))
+
+(deftest test_less_than_first_param_is_greater_than_second
+    (assert (= (< 20 10) false)))
+    
+(deftest test_less_than_second_param_is_greater_than_first
+    (assert (= (< 10 20) true)))
+    
+(deftest test_zero_is_not_less_than_zero
+    (assert (= (< 0 0) false)))
+    
+(deftest test_zero_is_not_greater_than_zero
+    (assert (= (> 0 0) false)))
 
 (deftest test_car_returns_first_item
     (assert (= (car (quote (1 2 3))) 1)))
