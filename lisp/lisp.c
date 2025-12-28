@@ -790,6 +790,16 @@ static int find(Object* obj, Object* list) {
     return -1;
 }
 
+static Object* last(Object* obj) {
+    Object* last;
+
+    last = obj;
+    while (cdr(last) != NULL) {
+        last = cdr(last);
+    }
+    return last;
+}
+
 static void fprint(FILE* fp, Object* obj) {
     Object* temp;
 
@@ -1433,17 +1443,49 @@ static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
         arg_array[rest_arg] = rest;
     }
     
+    /* Call the function */
     if (!function->data.fn.is_user_defined) {
         result = function->data.fn.fn(arg_array);
     } else {
         result = function_wrapper(function, arg_array);
     }
 
+    /* If function was a macro then evaluate the result */
     if (expand_macro && function->data.fn.is_macro) {
         result = eval(env, result);
     }
 
     return result;
+}
+
+static Object* apply(Object* args[]) {
+
+    Object* function;
+    Object* cons;
+    Object* temp;
+    Object* prev;
+    int i;
+
+    function = args[0];
+    cons = cons_new(NULL, NULL);
+    temp = cons;
+    prev = temp;
+    i = 1;
+    while (args[i+1] != NULL) {
+        setcar(temp, args[i]);
+        setcdr(temp, cons_new(NULL, NULL));
+        prev = temp;
+        temp = cdr(temp);
+        i++;
+    }
+
+    if (is_type(args[i], CONS)) {
+        setcdr(prev, args[i]);
+    } else {
+        setcdr(prev, cons_new(args[i], NULL));
+    }
+
+    return eval_function_call(gc->env_stack[gc->tos], cons_new(function, cons), 0);
 }
 
 /**
@@ -1797,6 +1839,10 @@ static Object* copy(Object* obj) {
 
 }
 
+Object* builtin_apply(Object* args[]) {
+    return apply(args);
+}
+
 Object* builtin_car(Object* args[]) {
     return car(args[0]);
 }
@@ -1936,6 +1982,10 @@ Object* builtin_find(Object* args[]) {
         return number_new(pos);
     }
     return NULL;
+}
+
+Object* builtin_last(Object* args[]) {
+    return last(args[0]);
 }
 
 /* func is macro that just combines 'define' and 'lambda' to
@@ -2100,6 +2150,7 @@ static void init_env(Map* env) {
     map_put(env, "true", bool_new(1));
     map_put(env, "false", bool_new(0));
 
+    map_put(env, "apply", function_new(builtin_apply));
     map_put(env, "car", function_new(builtin_car));
     map_put(env, "setcar", function_new(builtin_setcar));
     map_put(env, "cdr", function_new(builtin_cdr));
@@ -2115,6 +2166,7 @@ static void init_env(Map* env) {
     map_put(env, "copy", function_new(builtin_copy));
     map_put(env, "len", function_new(builtin_len));
     map_put(env, "find", function_new(builtin_find));
+    map_put(env, "last", function_new(builtin_last));
     
     map_put(env, "func", macro_new(builtin_func));
     map_put(env, "defmacro", macro_new(builtin_defmacro));

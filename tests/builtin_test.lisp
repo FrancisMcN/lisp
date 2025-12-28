@@ -59,6 +59,18 @@
 (deftest test_cdr_of_empty_list_is_nil
     (assert (= (cdr ()) nil)))
     
+(deftest test_last_returns_the_last_cdr_of_a_list
+    (assert (= (last '(a b c d)) '(d))))
+    
+(deftest test_last_returns_nil_for_empty_list
+    (assert (= (last '()) nil)))
+    
+(deftest test_apply_calls_the_correct_function_with_args
+    (assert (= (apply + 1 2 3 4 5 6) 21)))
+    
+(deftest test_apply_splices_last_argument_if_its_a_list
+    (assert (= (apply + 1 2 '(3 4 5)) 15)))
+    
 (deftest test_setcdr_replaces_cdr_of_list
     (let (l '(1 2 3 4 5))
         (do (setcdr l '(4 6 8 10))
