@@ -71,6 +71,9 @@
 (deftest test_apply_splices_last_argument_if_its_a_list
     (assert (= (apply + 1 2 '(3 4 5)) 15)))
     
+(deftest test_apply_with_list
+    (assert (= (apply list '(1 2)) '(1 2))))
+    
 (deftest test_setcdr_replaces_cdr_of_list
     (let (l '(1 2 3 4 5))
         (do (setcdr l '(4 6 8 10))
