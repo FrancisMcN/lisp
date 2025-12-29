@@ -106,6 +106,20 @@ The `do` special form is now supported, it's useful for when you want to include
 3
 ```
 
+The `apply` function is now supported. Apply takes a function as its first argument and the arguments to be passed into the function as its remaining arguments. If the last argument to apply is itself a list, the items in that list will be passed individually to `apply`.
+```lisp
+> (apply + 1 2 3)
+6
+> (apply + 1 2 '(3 4 5))
+15
+```
+
+A basic implementation of the `cond` macro has also been added to make large if-statements easier to read and write.
+```lisp
+> (macroexpand '(cond (< 1 2) (print "yes") (< 3 4) (print "also yes")))
+(if (< 1 2) (print yes) (if (< 3 4) (print also yes)))
+```
+
 The `let` special form is supported too. You can use the let special form to create local variables.
 ```lisp
 (let (x 1 y 2)
