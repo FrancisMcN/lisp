@@ -1485,6 +1485,13 @@ static Object* apply(Object* args[]) {
         setcdr(prev, cons_new(args[i], NULL));
     }
 
+    /* If the only argument passed to apply is a list the previous
+     loop won't run causing the first car entry to be nil. This ugly
+     fix corrects that by removing the first cons cell if its car is nil */
+    if (car(cons) == NULL) {
+        cons = cdr(cons);
+    }
+
     return eval_function_call(gc->env_stack[gc->tos], cons_new(function, cons), 0);
 }
 
@@ -2186,6 +2193,7 @@ static void init_env(Map* env) {
     map_put(env, "*", function_new(builtin_multiply));
     map_put(env, "/", function_new(builtin_divide));
     
+    exec(env, "(import \"lib/core.lisp\")");
     exec(env, "(import \"lib/iteration.lisp\")");
 
 }
