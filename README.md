@@ -108,8 +108,8 @@ The `do` special form is now supported, it's useful for when you want to include
 
 The `apply` function is now supported. Apply takes a function as its first argument and the arguments to be passed into the function as its remaining arguments. If the last argument to apply is itself a list, the items in that list will be passed individually to `apply`.
 ```lisp
-> (apply + 1 2 3)
-6
+> (apply + 1 2 3 4)
+10
 > (apply + 1 2 '(3 4 5))
 15
 ```
