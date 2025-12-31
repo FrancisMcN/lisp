@@ -12,8 +12,8 @@
     
 ;; 'deftest' is used to implement unit tests
 (defmacro deftest (name body)
-    `(do (defn ,name () ,body)
-        (,name)))
+    `(let (err nil) (do (defn ,name () ,body)
+        (,name) (= err nil))))
 
 ;; 'cond' makes large if-statements more convenient to read
 ;; and write.
@@ -26,4 +26,6 @@
 ;; 'assert' is currently intended for unit testing but may be expanded
 ;; in the future.
 (defmacro assert (condition)
-    `(cond ,condition true))
+    `(do (if ,condition
+        true
+        (set err (error "assertion failed")))))

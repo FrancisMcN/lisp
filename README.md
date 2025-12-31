@@ -126,6 +126,13 @@ The `let` special form is supported too. You can use the let special form to cre
     (do (+ x y)))
 ```
 
+The `set` special form allows you to update previously set values, such as those set using `let` or `define`.
+```lisp
+(let (x 1 y 2)
+    (do (set x 6)
+    (+ x y)))
+```
+
 There are two macros to support looping, `dowhile` and `dotimes`. `dotimes` is used to loop for a specified number of iterations.
 ```lisp
 > (dotimes (print "hello") 5)

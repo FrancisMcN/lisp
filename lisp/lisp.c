@@ -91,7 +91,7 @@ typedef struct {
 /* Pre-declaring some map / hash table function signatures */
 static Map* map_new(size_t size);
 static void map_put(Map* map, char* key, Object* obj);
-static Object* map_get(Map* map, char* key);
+static MapEntry map_get(Map* map, char* key);
 static void map_resize(Map* map);
 static void map_free(Map* map);
 
@@ -146,7 +146,12 @@ static char is_type(Object* object, Type obj_type) {
  * @return - returns true if debug mode is enabled
  */
 static char is_debug_enabled(void) {
-    Object* obj = map_get(gc->env_stack[gc->tos], "/lisp/debug-mode");
+    MapEntry entry;
+    Object* obj;
+
+    entry = map_get(gc->env_stack[gc->tos], "/lisp/debug-mode");
+    obj = entry.value;
+
     if (is_type(obj, BOOL) && obj->data.num == 1) {
         return 1;
     }
@@ -534,9 +539,12 @@ static size_t hash(char* key) {
 
 static void map_resize(Map* map) {
     
+    MapEntry* data;
     size_t existing_map_size = map->size;
     size_t new_map_size = existing_map_size * 2;
     size_t i;
+    size_t size;
+    size_t used;
     
     Map* new_map = map_new(new_map_size);
     for (i = 0; i < map->size; i++) {
@@ -545,9 +553,9 @@ static void map_resize(Map* map) {
         }
     }
     
-    MapEntry* data = new_map->data;
-    size_t size = new_map->size;
-    size_t used = new_map->used;
+    data = new_map->data;
+    size = new_map->size;
+    used = new_map->used;
 
     free(map->data);
 
@@ -616,14 +624,16 @@ static void map_put(Map* map, char* key, Object* obj) {
  * @param key - the key to search for
  * @return - the object from the map / hash table if it exists, otherwise NULL
  */
-static Object* map_get(Map* map, char* key) {
+static MapEntry map_get(Map* map, char* key) {
+
+    MapEntry entry = {NULL, NULL};
 
     size_t key_hash = hash(key);
     key_hash = key_hash  % (map->size);
     if (map->data[key_hash].key != NULL) {
         if (strcmp(map->data[key_hash].key, key) == 0) {
             /* Found the item, return the object */
-            return map->data[key_hash].value;
+            return map->data[key_hash];
         }
 
         /* Found a collision, iterate over the rest of the table to find the map entry if it exists */
@@ -631,7 +641,7 @@ static Object* map_get(Map* map, char* key) {
             /* Found the object after the collision, return the object */
             if (strcmp(map->data[key_hash].key, key) == 0) {
                 /* Found the item, return the object */
-                return map->data[key_hash].value;
+                return map->data[key_hash];
             }
 
             key_hash += 1;
@@ -642,7 +652,7 @@ static Object* map_get(Map* map, char* key) {
     }
 
     /* The value we were looking for isn't in the table */
-    return NULL;
+    return entry;
 }
 
 /**
@@ -1105,6 +1115,7 @@ static char is_special_form(Object* cons) {
             strcmp(sym, "macro") == 0 ||
             strcmp(sym, "do") == 0 ||
             strcmp(sym, "let") == 0 ||
+            strcmp(sym, "set") == 0 ||
             strcmp(sym, "if") == 0) {
             return 1;
             }
@@ -1268,7 +1279,6 @@ static Object* eval_let_special_form(Map* env, Object* obj) {
     while (temp != NULL) {
         Object* name = car(temp);
         Object* value = eval(env, car(cdr(temp)));
-
         map_put(local_env, name->data.str, value);
         temp = cdr(cdr(temp));
     }
@@ -1278,6 +1288,53 @@ static Object* eval_let_special_form(Map* env, Object* obj) {
     pop_local_environment();
 
     return res;
+}
+
+static void replace_environment_value(char* name, Object* new_value) {
+
+    unsigned long i;
+
+    for (i = gc->tos + 1; i-- > 0; ) {
+        if (map_get(gc->env_stack[i], name).key != NULL) {
+            break;
+        }
+    }
+
+    map_put(gc->env_stack[i], name, new_value);
+
+}
+
+/**
+ * The set special form has two possible variations
+ * (set <var> <val>)
+ * (set (<var1> <val1>) (<var2> <val2>))
+ * @param env - the interpreter environment
+ * @param obj - an object representing the set special form
+ * @return - the result of evaluating the set special form
+ */
+static Object* eval_set_special_form(Map* env, Object* obj) {
+
+    Object* temp;
+    Object* name;
+    Object* value;
+
+    /* determine which version of set to evaluate */
+    /* if the first argument is of type CONS then expect */
+    /* to modify multiple variables */
+    if (is_type(car(cdr(obj)), CONS)) {
+        temp = cdr(obj);
+        while (car(temp) != NULL) {
+            name = car(car(temp));
+            value = eval(env, car(cdr(car(temp))));
+            replace_environment_value(name->data.str, value);
+            temp = cdr(temp);
+        }
+    } else {
+        name = car(cdr(obj));
+        value = eval(env, car(cdr(cdr(obj))));
+        replace_environment_value(name->data.str, value);
+    }
+    return NULL;
 }
 
 static char is_truthy(Object* obj) {
@@ -1371,6 +1428,9 @@ static Object* eval_special_form(Map* env, Object* obj) {
     }
     if (strcmp(first->data.str, "let") == 0) {
         return eval_let_special_form(env, obj);
+    }
+    if (strcmp(first->data.str, "set") == 0) {
+        return eval_set_special_form(env, obj);
     }
     if (strcmp(first->data.str, "if") == 0) {
         return eval_if_special_form(env, obj);
@@ -1654,6 +1714,7 @@ Object* read(char* str) {
 
 Object* eval(Map* env, Object* obj) {
     size_t i;
+    MapEntry entry;
     Object* res = NULL;
     if (obj != NULL) {
         switch (obj->type) {
@@ -1667,8 +1728,9 @@ Object* eval(Map* env, Object* obj) {
                 }
 
                 for (i = gc->tos + 1; i-- > 0; ) {
-                    res = map_get(gc->env_stack[i], obj->data.str);
-                    if (res != NULL) {
+                    entry = map_get(gc->env_stack[i], obj->data.str);
+                    if (entry.key != NULL) {
+                        res = entry.value;
                         break;
                     }
                 }
@@ -1752,7 +1814,6 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
     Object* first;
     Object* obj;
     size_t test_no;
-    Map* local_env;
     printf("=== testing (%s) ===\n", filename);
     
     test_no = 0;
@@ -1764,9 +1825,7 @@ static void exec_tests(Map* env, char* filename, char* str, size_t* pass_count, 
         first = car(obj);
         if (first != NULL && strcmp(first->data.str, "deftest") == 0) {
             Object* test_name = car(cdr(obj));
-            local_env = push_local_environment();
-            obj = eval(local_env, obj);
-            pop_local_environment();
+            obj = eval(env, obj);
             if (obj != NULL && obj->type == BOOL && obj->data.num == 1) {
                 printf("PASS ");
                 (*pass_count)++;
