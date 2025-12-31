@@ -539,9 +539,12 @@ static size_t hash(char* key) {
 
 static void map_resize(Map* map) {
     
+    MapEntry* data;
     size_t existing_map_size = map->size;
     size_t new_map_size = existing_map_size * 2;
     size_t i;
+    size_t size;
+    size_t used;
     
     Map* new_map = map_new(new_map_size);
     for (i = 0; i < map->size; i++) {
@@ -550,9 +553,9 @@ static void map_resize(Map* map) {
         }
     }
     
-    MapEntry* data = new_map->data;
-    size_t size = new_map->size;
-    size_t used = new_map->used;
+    data = new_map->data;
+    size = new_map->size;
+    used = new_map->used;
 
     free(map->data);
 
