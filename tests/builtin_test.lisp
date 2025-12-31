@@ -127,3 +127,16 @@
 (deftest test_find_returns_nil_if_object_not_in_list
     (let (x '(a b c d e f))
         (assert (= (find 'missing x) nil))))
+        
+;; unit tests for the set special form
+
+(deftest test_set_can_change_the_value_of_local_variable
+    (let (x 100)
+        (do (set x 200)
+            (assert (= x 200)))))
+            
+(deftest test_set_can_change_multiple_values
+    (let (x 100 y 200)
+        (do (set (x "hello") (y "world"))
+            (assert (= x "hello"))
+            (assert (= y "world")))))
