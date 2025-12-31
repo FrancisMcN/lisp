@@ -17,16 +17,16 @@
         (assert (= & '(1 2 3 4)))) 1 2 3 4)))
         
 (deftest test_cond_macro_with_a_single_condition
-        (assert (= '(if (< 1 2) (print "a"))
+    (assert (= '(if (< 1 2) (print "a"))
                     (macroexpand '(cond (< 1 2) (print "a"))))))
 
 (deftest test_cond_macro_with_multiple_conditions
-        (assert (= '(if (< 1 2)
-                        (print "a")
-                        (if (< 2 3)
-                            (print "b")))
-                    (macroexpand '(cond (< 1 2) (print "a")
-                                        (< 2 3) (print "b"))))))
+    (assert (= '(if (< 1 2)
+                    (print "a")
+                    (if (< 2 3)
+                        (print "b")))
+                (macroexpand '(cond (< 1 2) (print "a")
+                                    (< 2 3) (print "b"))))))
 
 (deftest test_function_call_with_zero_args
-    ((lambda () true)))
+    (assert ((lambda () true))))

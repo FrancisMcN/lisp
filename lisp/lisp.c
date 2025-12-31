@@ -2217,7 +2217,6 @@ static void init_env(Map* env) {
     map_put(env, "/", function_new(builtin_divide));
     
     exec(env, "(import \"lib/core.lisp\")");
-    exec(env, "(import \"lib/iteration.lisp\")");
 
 }
 
