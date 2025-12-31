@@ -1413,7 +1413,7 @@ static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
 
     temp = args;
     i = 0;
-    while (car(temp) != NULL) {
+    while (car(temp) != NULL || i < arg_count) {
         
         /* Don't evaluate args if the function is a macro */
         if (!function->data.fn.is_macro) {
@@ -1995,38 +1995,6 @@ Object* builtin_last(Object* args[]) {
     return last(args[0]);
 }
 
-/* func is macro that just combines 'define' and 'lambda' to
- * create named functions */
-Object* builtin_func(Object* args[]) {
-    Object* name = args[0];
-    Object* fn_args = args[1];
-    Object* body = args[2];
-
-    return cons_new(symbol_new("define"), cons_new(name, cons_new(cons_new(symbol_new("lambda"), cons_new(fn_args, cons_new(body, NULL))), NULL)));
-}
-
-/* defmacro is itself a builtin macro, similar to the func macro */
-Object* builtin_defmacro(Object* args[]) {
-    Object* name = args[0];
-    Object* fn_args = args[1];
-    Object* body = args[2];
-
-    return cons_new(symbol_new("define"), cons_new(name, cons_new(cons_new(symbol_new("macro"), cons_new(fn_args, cons_new(body, NULL))), NULL)));
-}
-
-Object* builtin_deftest(Object* args[]) {
-    
-    Object* test_name = args[0];
-    Object* test_body = args[1];
-    return cons_new(symbol_new("do"), cons_new(cons_new(symbol_new("func"), cons_new(test_name, cons_new(cons_new(NULL, NULL), cons_new(test_body, NULL)))), cons_new(cons_new(test_name, NULL), NULL)));
-    
-}
-
-Object* builtin_assert(Object* args[]) {
-    
-    return cons_new(symbol_new("if"), cons_new(args[0], cons_new(symbol_new("true"), cons_new(symbol_new("false"), NULL))));
-}
-
 Object* builtin_macroexpand1(Object* args[]) {
     return macroexpand1(args[0]);
 }
@@ -2175,10 +2143,6 @@ static void init_env(Map* env) {
     map_put(env, "find", function_new(builtin_find));
     map_put(env, "last", function_new(builtin_last));
     
-    map_put(env, "func", macro_new(builtin_func));
-    map_put(env, "defmacro", macro_new(builtin_defmacro));
-    map_put(env, "assert", macro_new(builtin_assert));
-    map_put(env, "deftest", macro_new(builtin_deftest));
     map_put(env, "macroexpand", function_new(builtin_macroexpand));
     map_put(env, "macroexpand-1", function_new(builtin_macroexpand1));
 

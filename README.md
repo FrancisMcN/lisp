@@ -160,7 +160,7 @@ Below is an example showing how to assign a name to a function.
 
 Variadic functions are supported too by using the `&` symbol as the final parameter in the function definition.
 ```lisp
-(func f (a b c &)
+(defn f (a b c &)
     (do (print a)
         (print b)
         (print c)
