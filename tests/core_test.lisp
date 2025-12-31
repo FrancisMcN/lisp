@@ -27,3 +27,6 @@
                             (print "b")))
                     (macroexpand '(cond (< 1 2) (print "a")
                                         (< 2 3) (print "b"))))))
+
+(deftest test_function_call_with_zero_args
+    ((lambda () true)))

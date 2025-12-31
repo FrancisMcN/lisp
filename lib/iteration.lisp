@@ -2,7 +2,7 @@
 
 ;; recursive-dotimes is a recursive function which evaluates 
 ;; 'body' the associated number of times
-(func recursive-dotimes (body times)
+(defn recursive-dotimes (body times)
     (do (eval body)
         (if (= times 1) nil
             (recursive-dotimes body (- times 1)))))
@@ -15,7 +15,7 @@
 ;; recursive-dowhile is a recursive function which evaluates
 ;; 'body' repeatedly until 'condition' is false. The repetition
 ;; is achieved using recursion.
-(func recursive-dowhile (condition body)
+(defn recursive-dowhile (condition body)
     (if (= (eval condition) true)
         (do (eval body)
             (recursive-dowhile condition body))))
