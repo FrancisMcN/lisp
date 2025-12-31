@@ -1293,13 +1293,21 @@ static Object* eval_let_special_form(Map* env, Object* obj) {
 static void replace_environment_value(char* name, Object* new_value) {
 
     unsigned long i;
+    char found;
+    
+    found = 0;
 
     for (i = gc->tos + 1; i-- > 0; ) {
         if (map_get(gc->env_stack[i], name).key != NULL) {
+            found = 1;
             break;
         }
     }
 
+    /* If the variable doesn't already exist then store it gc->tos */
+    if (!found) {
+        i = gc->tos;
+    }
     map_put(gc->env_stack[i], name, new_value);
 
 }

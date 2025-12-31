@@ -140,3 +140,7 @@
         (do (set (x "hello") (y "world"))
             (assert (= x "hello"))
             (assert (= y "world")))))
+            
+(deftest test_set_previously_non_existent_of_value
+    (do (set x1 1)
+        (assert (= x1 1))))
