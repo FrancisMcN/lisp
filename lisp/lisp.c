@@ -347,9 +347,9 @@ static Object* string_new(char* str) {
     Object* obj = object_new();
     obj->type = STRING;
 
-    len = strlen(str) - 1;
+    len = strlen(str);
     obj->data.str = (char*)malloc(sizeof(char) * (len + 1));
-    strcpy(obj->data.str, str + 1);
+    strcpy(obj->data.str, str);
     return obj;
 }
 
@@ -708,27 +708,27 @@ static char is_equal(Object* a, Object* b) {
 
 static Object* type(Object* obj) {
     if (obj == NULL) {
-        return string_new("\"nil");
+        return string_new("nil");
     }
     switch (obj->type) {
         case NUMBER:
-            return string_new("\"number");
+            return string_new("number");
         case SYMBOL:
-            return string_new("\"symbol");
+            return string_new("symbol");
         case STRING:
-            return string_new("\"string");
+            return string_new("string");
         case ERROR:
-            return string_new("\"error");
+            return string_new("error");
         case FUNCTION:
-            return string_new("\"function");
+            return string_new("function");
         case MACRO:
-            return string_new("\"macro");
+            return string_new("macro");
         case CONS:
-            return string_new("\"cons");
+            return string_new("cons");
         case BOOL:
-            return string_new("\"bool");
+            return string_new("bool");
         default:
-            return string_new("\"unknown");
+            return string_new("unknown");
     }
 }
 
@@ -884,6 +884,45 @@ static void read_stdin(char buff[]) {
     }
 }
 
+/* An enum representing each kind of token in the scanner */
+typedef enum { T_LPAREN, T_RPAREN, T_STRING, T_NUMBER, T_SYMBOL, T_QUOTE, T_COMMA, T_BACKTICK, T_EOF } TokenType;
+
+/* The struct representing a token used by the reader */
+typedef struct {
+    TokenType type;
+    char* value;
+} Token;
+
+/**
+ * Creates a new token and allocates it onto the heap
+ * @param type - the token type from the TokenType enum
+ * @param value - a stream of characters representing the token's value
+ * @return - the newly allocated token
+ */
+static Token* token_new(TokenType type, char* value) {
+    Token* token;
+    unsigned long len;
+
+    token = malloc(sizeof(Token));
+    token->type = type;
+    len = strlen(value);
+    token->value = (char*)malloc(sizeof(char) * (len + 1));
+    strcpy(token->value, value);
+
+    return  token;
+}
+
+/**
+ * Frees the token and its memory
+ * @param token - the token to free
+ */
+static void token_free(Token* token) {
+    if (token != NULL) {
+        free(token->value);
+        free(token);
+    }
+}
+
 /*
  * Start of scanning and parsing functions
  */
@@ -891,19 +930,6 @@ static void read_stdin(char buff[]) {
 static Object* expr(char** str);
 static Object* list(char** str);
 static Object* atom(char** str);
-
-/**
- * Clears the buffer so it can be re-used. Ideally buffers are
- * allocated on the stack, re-used and cleared for re-use by this
- * function.
- * @param buff - the buffer of characters to clear
- */
-static void clear_buff(char buff[]) {
-    int i;
-    for (i = 0; i < BUFF_SIZE; i++) {
-        buff[i] = 0;
-    }
-}
 
 /**
  * Determines whether the provided character c is numeric
@@ -958,128 +984,179 @@ static char is_string(char c) {
 }
 
 /**
+ * Returns the current character from the input stream
+ * @param str - the input stream
+ * @return - the current character in the input stream
+ */
+static char current_char(char** str) {
+    return **str;
+}
+
+/**
+ * Advances the input stream and returns the next character
+ * @param str - the input stream
+ * @return - the next character in the input stream
+ */
+static char next_char(char** str) {
+    return *((*str)+1);
+}
+
+/**
+ * Advances the input stream by an arbitrary amount and returns the next character
+ * @param str - the input stream
+ * @return - the next character in the input stream
+ */
+static char advance_char(char** str, size_t p) {
+    (*str) += p;
+    return **str;
+}
+
+/**
+ * Advances the input stream until the end of the current line or EOF
+ * @param str - the input stream
+ */
+static void scan_comment(char** str) {
+    char c;
+    c = current_char(str);
+    while (c != '\n' && c != EOF) {
+        c = advance_char(str, 1);
+    }
+}
+
+/**
+ * Scans a string from the input stream
+ * @param str - the input stream
+ * @param buff - the buffer containing the string
+ */
+static void scan_string(char** str, char* buff) {
+    char c;
+    char i;
+
+    c = **str;
+    i = 0;
+    while (c != '"') {
+        buff[i++] = c;
+        c = *(++(*str));
+    }
+}
+
+/**
+ * Scans a symbol from the input stream
+ * @param str - the input stream
+ * @param buff - the buffer containing the symbol
+ */
+static void scan_symbol(char** str, char* buff) {
+    char c;
+    char i;
+
+    c = **str;
+    i = 0;
+    while (is_symbol(c)) {
+        buff[i++] = c;
+        c = *(++(*str));
+    }
+}
+
+/**
+ * Scans a number from the input stream
+ * @param str - the input stream
+ * @param buff - the buffer containing the number
+ */
+static void scan_number(char** str, char* buff) {
+    char c;
+    char i;
+
+    c = **str;
+    i = 0;
+    if (c == '-') {
+        buff[i++] = c;
+        c = *(++(*str));
+    }
+    while (is_number(c)) {
+        buff[i++] = c;
+        c = *(++(*str));
+    }
+}
+
+/**
  * Determines the next token in the input stream and stores
  * the generated token in the provided buffer. Buff is allocated
  * on the stack.
  * @param str - the input stream
- * @param buff - the provided buffer
  * @return - how many characters of the input stream were consumed or -1 if an error occurred during scanning
  */
-static Object* peek(char** str, char buff[]) {
+static Token* next(char** str) {
 
-    Object* res;
     char* temp;
     char consumed;
     char c;
-    clear_buff(buff);
+    char buff[255] = {0};
 
     temp = *str;
     consumed = 0;
     c = *temp;
-    res = NULL;
 
-    while (c != 0) {
-
-        c = *(temp++);
-
+    while (c != '\0' && strlen(*str) > 0) {
+        c = current_char(str);
+        
         if (c == '(') {
-            consumed++;
-            *buff = '(';
-            break;
-        }
-
-        if (c == ')') {
-            consumed++;
-            *buff = ')';
-            break;
-        }
-
-        if (c == '\'') {
-            consumed++;
-            *buff = '\'';
-            break;
-        }
-
-        if (c == '`') {
-            consumed++;
-            *buff = '`';
-            break;
-        }
-
-        if (c == ',') {
-            consumed++;
-            *buff = ',';
-            break;
-        }
-
-        /* Ignore whitespace, tabs, returns and newlines */
-        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-            consumed++;
+            c = advance_char(str, 1);
+            return token_new(T_LPAREN, "(");
+        } else if (c == ')') {
+            c = advance_char(str, 1);
+            return token_new(T_RPAREN, ")");
+        } else if (c == '\'') {
+            c = advance_char(str, 1);
+            return token_new(T_QUOTE, "'");
+        } else if (c == ',') {
+            c = advance_char(str, 1);
+            return token_new(T_COMMA, ",");
+        } else if (c == '`') {
+            c = advance_char(str, 1);
+            return token_new(T_BACKTICK, "`");
+        } else if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            /* Ignore whitespace, tabs, returns and newlines */
+            c = advance_char(str, 1);
+        } else if (c == ';') {
+            scan_comment(str);
             continue;
-        }
-
-        if (is_number(c)) {
-            while (is_number(c)) {
-                consumed++;
-                *(buff++) = c;
-                c = *(temp++);
-            }
-            break;
-        }
-
-        if (c == '"') {
-            consumed++;
-            *(buff++) = c;
-            c = *(temp++);
-            while (c != '"') {
-
-                if (c == '\n') {
-                    return error_new("syntax error: found EOL while scanning string");
-                }
-
-                if (c == EOF) {
-                    return error_new("syntax error: found EOF while scanning string");
-                }
-
-                consumed++;
-                *(buff++) = c;
-                c = *(temp++);
-            }
-            consumed++;
-            break;
-        }
-
-        /* Everything after ; is part of a comment until the next newline */
-        if (c == ';') {
-            while (c != '\n') {
-                c = *(temp++);
-                consumed++;
-            }
-            break;
-        }
-
-        if (is_symbol(c)) {
-            while (is_symbol(c)) {
-                consumed++;
-                *(buff++) = c;
-                c = *(temp++);
-            }
-            break;
+        } else if ((c == '-' && is_number(next_char(str))) || is_number(c)) {
+            scan_number(str, buff);
+            return token_new(T_NUMBER, buff);
+        } else if (is_string(c)) {
+            advance_char(str, 1);
+            scan_string(str, buff);
+            advance_char(str, 1);
+            return token_new(T_STRING, buff);
+        } else if (is_symbol(c)) {
+            scan_symbol(str, buff);
+            return token_new(T_SYMBOL, buff);
         }
 
     }
 
-    return number_new(consumed);
+    return token_new(T_EOF, "EOF");
+    
+}
 
+static Token* peek(char** str) {
+    char* temp;
+    Token* token;
+
+    temp = *str;
+    token = next(str);
+    *str = temp;
+
+    return token;
 }
 
 /**
  * Determines if the string/token in the buffer is an atom
- * @param buff - contains a string/token under consideration
+ * @param token - the token representing the potential atom
  * @return - true or false
  */
-static char is_atom(char buff[]) {
-    if (is_number(*buff) || is_string(*buff) || is_symbol(*buff)) {
+static char is_atom(Token* token) {
+    if (token->type == T_NUMBER || token->type == T_STRING || token->type == T_SYMBOL) {
         return 1;
     }
     return 0;
@@ -1088,11 +1165,11 @@ static char is_atom(char buff[]) {
 /**
  * Determines if the string/token in the buffer is an expr, i.e.
  * either the beginning of a list or an atom
- * @param buff - contains the string/token under consideration
+ * @param token - the token representing the potential atom
  * @return - true or false
  */
-static char is_expr(char buff[]) {
-    if (*buff == '\'' || *buff == '`' || *buff == ',' || *buff == '(' || is_atom(buff)) {
+static char is_expr(Token* token) {
+    if (token->type == T_QUOTE || token->type == T_BACKTICK || token->type == T_COMMA || token->type == T_LPAREN || is_atom(token)) {
         return 1;
     }
     return 0;
@@ -1136,22 +1213,6 @@ static char is_unquote(Object* obj) {
         }
     }
     return 0;
-}
-
-/**
- * Like peek() except it advances the input stream after
- * producing each token.
- * @param str - the input stream
- * @param buff - the buffer to contain the token
- */
-static Object* next(char** str, char buff[]) {
-    Object* obj = peek(str, buff);
-    if (is_type(obj, NUMBER)) {
-        *str += obj->data.num;
-    } else if (is_type(obj, ERROR)) {
-        return obj;
-    }
-    return NULL;
 }
 
 static Map* push_local_environment(void) {
@@ -1465,7 +1526,7 @@ static Object* eval_function_call(Map* env, Object* obj, char expand_macro) {
     int i;
     int arg_count;
     int rest_arg;
-    char error_buff[255];
+    char error_buff[255] = {0};
 
     function = eval(env, car(obj));
     
@@ -1585,20 +1646,17 @@ static Object* eval_list(Map* env, Object* obj) {
  * @return - (quote expr)
  */
 static Object* quote(char** str) {
-    char buff[BUFF_SIZE] = {0};
-    next(str, buff);
+    token_free(next(str));
     return cons_new(symbol_new("quote"), cons_new(expr(str), NULL));
 }
 
 static Object* unquote(char** str) {
-    char buff[BUFF_SIZE] = {0};
-    next(str, buff);
+    token_free(next(str));
     return cons_new(symbol_new("unquote"), cons_new(expr(str), NULL));
 }
 
 static Object* quasiquote(char** str) {
-    char buff[BUFF_SIZE] = {0};
-    next(str, buff);
+    token_free(next(str));
     return cons_new(symbol_new("quasiquote"), cons_new(expr(str), NULL));
 }
 
@@ -1611,51 +1669,44 @@ static Object* quasiquote(char** str) {
 static Object* list(char** str) {
 
     Object* temp;
+    Token* token;
     Object* prev;
     Object* obj = NULL;
-    Object* err;
 
-    char buff[BUFF_SIZE] = {0};
-    err = next(str, buff);
-    if (is_type(err, ERROR)) {
-        return err;
-    }
-
-    err = peek(str, buff);
-    if (is_type(err, ERROR)) {
-        return err;
-    }
+    token = next(str);
+    token_free(token);
 
     /* found an empty list which represents NULL/nil */
-    if (strcmp(buff, ")") == 0) {
-        next(str, buff);
+    token = peek(str);
+    if (token->type == T_RPAREN) {
+        token_free(token);
+        token_free(next(str));
         return NULL;
     }
 
     temp = cons_new(NULL, NULL);
     obj = temp;
     prev = temp;
-    while (is_expr(buff)) {
+    while (is_expr(token)) {
+        token_free(token);
         setcar(temp, expr(str));
         setcdr(temp, cons_new(NULL, NULL));
         prev = temp;
         temp = temp->data.cons.cdr;
-
-        peek(str, buff);
+        token = peek(str);
     }
 
     /* Remove extra empty cons cell, we don't need to free
      * the extra cons cell because we have garbage collection */
     prev->data.cons.cdr = NULL;
 
-    err = next(str, buff);
-    if (is_type(err, ERROR)) {
-        return err;
-    }
+    token_free(token);
+    token = next(str);
     
-    if (strcmp(buff, ")") != 0) {
-        return error_new("syntax error: missing expected ')'\n");
+    if (token->type != T_RPAREN) {
+        obj = error_new("syntax error: missing expected ')'\n");
     }
+    token_free(token);
     return obj;
 }
 
@@ -1665,19 +1716,22 @@ static Object* list(char** str) {
 static Object* atom(char** str) {
 
     Object* obj = NULL;
-    char buff[BUFF_SIZE] = {0};
-    peek(str, buff);
+    Token* token = NULL;
+    token = peek(str);
 
     /* is_number or is_number with a minus at the beginning*/
-    if (is_number(*buff) || (*buff == '-' && is_number(*(buff+1)))) {
-        obj = number_new(str_to_int(buff));
-    } else if (is_string(*buff)) {
-        obj = string_new(buff);
-    } else if (is_symbol(*buff)) {
-        obj = symbol_new(buff);
+    if (token->type == T_NUMBER) {
+        obj = number_new(str_to_int(token->value));
+    } else if (token->type == T_STRING) {
+        obj = string_new(token->value);
+    } else if (token->type == T_SYMBOL) {
+        obj = symbol_new(token->value);
     }
-
-    next(str, buff);
+    
+    token_free(token);
+    
+    token = next(str);
+    token_free(token);
 
     return obj;
 }
@@ -1686,30 +1740,29 @@ static Object* atom(char** str) {
  * expr : list | atom
  */
 static Object* expr(char** str) {
-    char buff[BUFF_SIZE] = {0};
-    Object* err = NULL;
+    Token* token = NULL;
+    Object* obj = NULL;
 
-    err = peek(str, buff);
-    if (is_type(err, ERROR)) {
-        return err;
-    }
+    token = peek(str);
 
-    if (strcmp(buff, "'") == 0) {
+    if (token->type == T_QUOTE) {
        /* found a shorthand quote */
-        return quote(str);
-    } else if (strcmp(buff, "`") == 0) {
+        obj = quote(str);
+    } else if (token->type == T_BACKTICK) {
         /* found a quasiquote */
-         return quasiquote(str);
-     } else if (strcmp(buff, ",") == 0) {
+        obj = quasiquote(str);
+     } else if (token->type == T_COMMA) {
          /* found a unquote */
-          return unquote(str);
-      } else if (strcmp(buff, "(") == 0) {
+         obj = unquote(str);
+      } else if (token->type == T_LPAREN) {
        /* found a list */
-        return list(str);
+          obj = list(str);
     } else {
        /* found an atom */
-        return atom(str);
+        obj = atom(str);
     }
+    token_free(token);
+    return obj;
 }
 
 Object* parse(char** str) {
@@ -1794,7 +1847,7 @@ static void exec(Map* env, char* str) {
     while (strlen(str) > 0) {
         
         obj = parse(&str);
-        
+
         res = eval(env, obj);
         /* Suppress nil in the REPL output,
          print errors to stderr and regular objects
