@@ -133,7 +133,15 @@ The `set` special form allows you to update previously set values, such as those
     (+ x y)))
 ```
 
-There are two macros to support looping, `dowhile` and `dotimes`. `dotimes` is used to loop for a specified number of iterations.
+There are three macros to support looping, `for`, `dowhile` and `dotimes`. The for loop takes an iterator variable called `i` in the example below, an iterable which is the list of elements to iterate over and the final argument is a form which will be evaluted on each iteration.
+```lisp
+> (for i :in '(1 2 3 4) (print (* i 2)))
+2
+4
+6
+8
+```
+`dotimes` is used to loop for a specified number of iterations.
 ```lisp
 > (dotimes (print "hello") 5)
 hello

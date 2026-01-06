@@ -502,6 +502,35 @@ static void object_free(Object* obj) {
     free(obj);
 }
 
+/**
+ * Reads text data from a file pointer where the data is of arbitrary length.
+ * @param fp - the file pointer to read the data from
+ * @return - a malloc'd string of characters of arbitrary length
+ */
+static char* read_string(FILE* fp) {
+
+    size_t p = 0;
+    size_t buff_size = BUFF_SIZE;
+
+    char* buff = malloc(buff_size * sizeof(char));
+
+    while (fp != NULL && !feof(fp) && !ferror(fp)) {
+
+        char temp[BUFF_SIZE] = {0};
+        if (fgets(temp, BUFF_SIZE, fp) != NULL) {
+            memcpy(buff + p, temp, strlen(temp));
+            p += strlen(temp);
+            buff[p] = 0;
+            /* if next line will overfill the buffer, allocate extra space */
+            if (p + BUFF_SIZE > buff_size ) {
+                buff = realloc(buff, strlen(buff) + buff_size * sizeof(char));
+            }
+        }
+    }
+
+    return buff;
+}
+
 /* Start of hash table implementation */
 
 /**
@@ -808,6 +837,32 @@ static Object* last(Object* obj) {
         last = cdr(last);
     }
     return last;
+}
+
+static Object* open(Object* file_to_open) {
+    char* filename;
+    FILE *fp;
+    Object* str;
+    char* temp_string;
+    char error_buff[255];
+
+    if (file_to_open == NULL || file_to_open->type != STRING) {
+        return error_new("file error: open requires 1 parameter which must be a string.");
+    }
+
+    /* Read file and evaluate each line */
+    filename = file_to_open->data.str;
+    fp = fopen(filename, "r");
+    if (fp == NULL) {
+        sprintf(error_buff, "file error: '%s' file not found", filename);
+        error_buff[254] = 0;
+        return error_new(error_buff);
+    }
+
+    temp_string = read_string(fp);
+    str = string_new(temp_string);
+    free(temp_string);
+    return str;
 }
 
 static void fprint(FILE* fp, Object* obj) {
@@ -1704,7 +1759,7 @@ static Object* list(char** str) {
     token = next(str);
     
     if (token->type != T_RPAREN) {
-        obj = error_new("syntax error: missing expected ')'\n");
+        obj = error_new("syntax error: missing expected ')'");
     }
     token_free(token);
     return obj;
@@ -1808,36 +1863,6 @@ Object* eval(Map* env, Object* obj) {
         }
     }
     return res;
-}
-
-
-/**
- * Reads text data from a file pointer where the data is of arbitrary length.
- * @param fp - the file pointer to read the data from
- * @return - a malloc'd string of characters of arbitrary length
- */
-static char* read_string(FILE* fp) {
-
-    size_t p = 0;
-    size_t buff_size = BUFF_SIZE;
-    
-    char* buff = malloc(buff_size * sizeof(char));
-
-    while (fp != NULL && !feof(fp) && !ferror(fp)) {
-
-        char temp[BUFF_SIZE] = {0};
-        if (fgets(temp, BUFF_SIZE, fp) != NULL) {
-            memcpy(buff + p, temp, strlen(temp));
-            p += strlen(temp);
-            buff[p] = 0;
-            /* if next line will overfill the buffer, allocate extra space */
-            if (p + BUFF_SIZE > buff_size ) {
-                buff = realloc(buff, strlen(buff) + buff_size * sizeof(char));
-            }
-        }
-    }
-
-    return buff;
 }
 
 static void exec(Map* env, char* str) {
@@ -2017,7 +2042,7 @@ Object* builtin_import(Object* args[]) {
     filename = import_path->data.str;
     fp = fopen(filename, "r");
     if (fp == NULL) {
-        sprintf(error_buff, "import error: '%s' file not found\n", filename);
+        sprintf(error_buff, "import error: '%s' file not found", filename);
         error_buff[254] = 0;
         return error_new(error_buff);
     }
@@ -2113,6 +2138,10 @@ Object* builtin_find(Object* args[]) {
 
 Object* builtin_last(Object* args[]) {
     return last(args[0]);
+}
+
+Object* builtin_open(Object* args[]) {
+    return open(args[0]);
 }
 
 Object* builtin_macroexpand1(Object* args[]) {
@@ -2262,6 +2291,7 @@ static void init_env(Map* env) {
     map_put(env, "len", function_new(builtin_len));
     map_put(env, "find", function_new(builtin_find));
     map_put(env, "last", function_new(builtin_last));
+    map_put(env, "open", function_new(builtin_open));
     
     map_put(env, "macroexpand", function_new(builtin_macroexpand));
     map_put(env, "macroexpand-1", function_new(builtin_macroexpand1));
