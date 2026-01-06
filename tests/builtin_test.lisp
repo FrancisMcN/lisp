@@ -101,6 +101,8 @@
         (dotimes (define x (+ x 1)) 5)
         (assert (= x 5))))
 
+;; start of unit tests for the dowhile macro
+
 (deftest test_dowhile_only_runs_code_when_condition_is_true
     (do (define y 0)
         (dowhile false (define y (+ y 1)))
@@ -111,6 +113,27 @@
         (dowhile (> x 5) (do
             (define x (- x 1))))
         (assert (= x 5))))
+        
+;; end of unit tests for the dowhile macro
+
+;; start of unit tests for the for macro
+
+(deftest test_for_loop_calls_body_correct_number_of_times
+	(let (l '(a b c d e) calls 0) (do
+		(for i :in l (set calls (+ calls 1)))
+		(assert (= calls (len l))))))
+
+(deftest test_for_loop_iterates_on_empty_list_zero_times
+	(let (l () calls 0) (do
+		(for i :in l (set calls (+ calls 1))
+		(assert (= calls 0))))))
+
+(deftest test_for_loop_doesnt_iterate_over_non_cons
+	(let (l 'not-a-list calls 0) (do
+		(for i :in l (set calls (+ calls 1))
+		(assert (= calls 0))))))
+
+;; end of unit tests for the for macro
 
 (deftest test_len_returns_the_length_of_a_list
     (let (x '(a b c d e f))
@@ -128,7 +151,7 @@
     (let (x '(a b c d e f))
         (assert (= (find 'missing x) nil))))
         
-;; unit tests for the set special form
+;; start of unit tests for the set special form
 
 (deftest test_set_can_change_the_value_of_local_variable
     (let (x 100)
@@ -144,3 +167,5 @@
 (deftest test_set_previously_non_existent_of_value
     (do (set x1 1)
         (assert (= x1 1))))
+
+;; end of unit tests for the set special form

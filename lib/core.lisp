@@ -54,3 +54,21 @@
 ;; function to make the interface better
 (defmacro dowhile (condition body)
     `(recursive-dowhile (quote ,condition) (quote ,body)))
+
+;; recursive-for is a recursive function which evaluates 'body'
+;; for on each iteration. The number of iterations is determined by
+;; the number of items in 'iterable'.
+;; currently 'iterable' is presumed to be of type CONS
+(defn recursive-for (iterator iterable body) (do
+    (if (> (len iterable) 0) (do
+        (eval (list 'set iterator (car iterable)))
+        (eval body)
+        (recursive-for iterator (cdr iterable) body)))))
+
+;; for is just a macro which wraps around the recursive-for function
+;; to make the interface better.
+(defmacro for (&)
+    `(recursive-for (quote ,(car &))
+    ,(car (cdr (cdr &)))
+    (quote ,(car (cdr (cdr (cdr &)))))))
+
