@@ -61,7 +61,7 @@
 ;; currently 'iterable' is presumed to be of type CONS
 (defn recursive-for (iterator iterable body) (do
     (if (> (len iterable) 0) (do
-        (eval (list 'set iterator (car iterable)))
+        (eval (list 'set iterator (list 'quote (car iterable))))
         (eval body)
         (recursive-for iterator (cdr iterable) body)))))
 
@@ -71,4 +71,3 @@
     `(recursive-for (quote ,(car &))
     ,(car (cdr (cdr &)))
     (quote ,(car (cdr (cdr (cdr &)))))))
-
