@@ -125,13 +125,24 @@
 
 (deftest test_for_loop_iterates_on_empty_list_zero_times
 	(let (l () calls 0) (do
-		(for i :in l (set calls (+ calls 1))
-		(assert (= calls 0))))))
+		(for i :in l (set calls (+ calls 1)))
+		(assert (= calls 0)))))
 
 (deftest test_for_loop_doesnt_iterate_over_non_cons
-	(let (l 'not-a-list calls 0) (do
-		(for i :in l (set calls (+ calls 1))
-		(assert (= calls 0))))))
+    (let (l 'not-a-list calls 0) (do
+        (for i :in l (set calls (+ calls 1)))
+            (assert (= calls 0)))))
+
+(deftest test_for_loop_doesnt_evaluate_iterators
+    (let (l '(a b c)) (do
+        (for i :in l (assert (= (type i) "symbol"))))))
+
+(deftest test_nested_for_loops_evaluate_the_correct_number_of_times
+    (let (calls 0) (do
+        (for i :in '(a b c) (do
+            (for j :in '(x y z) (do
+                (set calls (+ calls 1))))))
+        (assert (= calls 9)))))
 
 ;; end of unit tests for the for macro
 
