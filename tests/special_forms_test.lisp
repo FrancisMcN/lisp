@@ -16,9 +16,17 @@
     (let (a 5 b 7)
         (assert (= (+ a b) 12))))
 
+;; start of unit tests for the quote special form
+
 (deftest test_shorthand_quote_special_form
     (assert (= (quote a) 'a)))
     
+(deftest test_quote_with_multiple_arguments_returns_error
+    (let (x (quote a b c)) (do
+        (assert (= (type x) "error")))))
+
+;; end of unit tests for the quote special form
+
 (deftest test_quasiquote_shorthand_equals_long_form
     (assert (= `(a b c) (quasiquote (a b c)))))
 

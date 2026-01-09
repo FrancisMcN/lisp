@@ -1316,6 +1316,13 @@ static Object* eval_eval_special_form(Map* env, Object* obj) {
 }
 
 static Object* eval_quote_special_form(Map* env, Object* obj) {
+    Object* arg;
+    Object* rest;
+    rest = cdr(cdr(obj));
+    if (rest != NULL) {
+        return error_new("quote error: only 1 argument expected.");
+    }
+    arg = car(cdr(obj));
     return car(cdr(obj));
 }
 
