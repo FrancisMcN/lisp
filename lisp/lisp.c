@@ -206,7 +206,6 @@ typedef struct GC {
     size_t objects_at_last_collection;
     size_t objects_since_last_collection;
     Env* env;
-    Env** env_chain;
 } GC;
 
 /* Instantiate the global reference to the garbage collector,
@@ -1732,11 +1731,6 @@ static Object* apply(Env* env, Object* args[]) {
  * @return - the result of evaluating the list
  */
 static Object* eval_list(Env* env, Object* obj) {
-
-//    printf("obj: ");
-//    print(obj);
-//    printf("\n");
-    
     if (is_special_form(obj)) {
         return eval_special_form(env, obj);
     }
