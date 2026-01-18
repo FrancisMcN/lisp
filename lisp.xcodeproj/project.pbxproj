@@ -6,19 +6,46 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		15393B912F16EB5D00787EF4 /* core.lisp in CopyFiles */ = {isa = PBXBuildFile; fileRef = 15393B8A2F16EA1300787EF4 /* core.lisp */; };
+		15393B932F16FA4800787EF4 /* builtin_test.lisp in CopyFiles */ = {isa = PBXBuildFile; fileRef = 15393B8C2F16EA1900787EF4 /* builtin_test.lisp */; };
+		15393B942F16FA4800787EF4 /* core_test.lisp in CopyFiles */ = {isa = PBXBuildFile; fileRef = 15393B8D2F16EA1900787EF4 /* core_test.lisp */; };
+		15393B952F16FA4800787EF4 /* special_forms_test.lisp in CopyFiles */ = {isa = PBXBuildFile; fileRef = 15393B8E2F16EA1900787EF4 /* special_forms_test.lisp */; };
+		15393B962F16FA4800787EF4 /* type_test.lisp in CopyFiles */ = {isa = PBXBuildFile; fileRef = 15393B8F2F16EA1900787EF4 /* type_test.lisp */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXCopyFilesBuildPhase section */
-		15875D952DFE2BB60018FBFA /* CopyFiles */ = {
+		15393B922F16FA3D00787EF4 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = /usr/share/man/man1/;
-			dstSubfolderSpec = 0;
+			dstPath = tests;
+			dstSubfolderSpec = 16;
 			files = (
+				15393B932F16FA4800787EF4 /* builtin_test.lisp in CopyFiles */,
+				15393B942F16FA4800787EF4 /* core_test.lisp in CopyFiles */,
+				15393B952F16FA4800787EF4 /* special_forms_test.lisp in CopyFiles */,
+				15393B962F16FA4800787EF4 /* type_test.lisp in CopyFiles */,
 			);
-			runOnlyForDeploymentPostprocessing = 1;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		15875D952DFE2BB60018FBFA /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 12;
+			dstPath = lib;
+			dstSubfolderSpec = 16;
+			files = (
+				15393B912F16EB5D00787EF4 /* core.lisp in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		15393B8A2F16EA1300787EF4 /* core.lisp */ = {isa = PBXFileReference; lastKnownFileType = text; path = core.lisp; sourceTree = "<group>"; };
+		15393B8C2F16EA1900787EF4 /* builtin_test.lisp */ = {isa = PBXFileReference; lastKnownFileType = text; path = builtin_test.lisp; sourceTree = "<group>"; };
+		15393B8D2F16EA1900787EF4 /* core_test.lisp */ = {isa = PBXFileReference; lastKnownFileType = text; path = core_test.lisp; sourceTree = "<group>"; };
+		15393B8E2F16EA1900787EF4 /* special_forms_test.lisp */ = {isa = PBXFileReference; lastKnownFileType = text; path = special_forms_test.lisp; sourceTree = "<group>"; };
+		15393B8F2F16EA1900787EF4 /* type_test.lisp */ = {isa = PBXFileReference; lastKnownFileType = text; path = type_test.lisp; sourceTree = "<group>"; };
 		15875D972DFE2BB60018FBFA /* lisp */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = lisp; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -41,11 +68,32 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		15393B8B2F16EA1300787EF4 /* lib */ = {
+			isa = PBXGroup;
+			children = (
+				15393B8A2F16EA1300787EF4 /* core.lisp */,
+			);
+			path = lib;
+			sourceTree = "<group>";
+		};
+		15393B902F16EA1900787EF4 /* tests */ = {
+			isa = PBXGroup;
+			children = (
+				15393B8C2F16EA1900787EF4 /* builtin_test.lisp */,
+				15393B8D2F16EA1900787EF4 /* core_test.lisp */,
+				15393B8E2F16EA1900787EF4 /* special_forms_test.lisp */,
+				15393B8F2F16EA1900787EF4 /* type_test.lisp */,
+			);
+			path = tests;
+			sourceTree = "<group>";
+		};
 		15875D8E2DFE2BB60018FBFA = {
 			isa = PBXGroup;
 			children = (
 				15875D992DFE2BB60018FBFA /* lisp */,
 				15875D982DFE2BB60018FBFA /* Products */,
+				15393B8B2F16EA1300787EF4 /* lib */,
+				15393B902F16EA1900787EF4 /* tests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -67,6 +115,7 @@
 				15875D932DFE2BB60018FBFA /* Sources */,
 				15875D942DFE2BB60018FBFA /* Frameworks */,
 				15875D952DFE2BB60018FBFA /* CopyFiles */,
+				15393B922F16FA3D00787EF4 /* CopyFiles */,
 			);
 			buildRules = (
 			);
