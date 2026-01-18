@@ -307,10 +307,10 @@ static void gc_sweep(GC* gc) {
             object_free(ptr);
             count++;
         } else {
-            ptr->marked = 0;  // unmark live objects
+            ptr->marked = 0;  /* unmark live objects */
         }
 
-        ptr = prev;  // move safely
+        ptr = prev;  /* move safely */
     }
     
     env_unmark(gc->env);
