@@ -180,6 +180,8 @@ static void env_put(Env* env, char* key, Object* obj) {
 static MapEntry env_get(Env* env, char* key) {
     MapEntry entry;
 
+    entry.key = NULL;
+    entry.value = NULL;
     while (env != NULL) {
         entry = map_get(env->map, key);
         if (entry.key != NULL) {
@@ -188,7 +190,7 @@ static MapEntry env_get(Env* env, char* key) {
         env = env->prev;
     }
 
-    return (MapEntry){NULL, NULL};
+    return entry;
 }
 
 static void env_free(Env* env) {
@@ -287,7 +289,7 @@ static void gc_sweep(GC* gc) {
     Object* ptr = gc->tail;
 
     while (ptr != NULL) {
-        Object* prev = ptr->prev;   // SAVE traversal pointer FIRST
+        Object* prev = ptr->prev;   /* SAVE traversal pointer FIRST */
 
         if (!ptr->marked) {
             /* unlink from list */
