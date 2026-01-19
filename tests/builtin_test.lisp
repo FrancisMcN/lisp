@@ -162,21 +162,5 @@
     (let (x '(a b c d e f))
         (assert (= (find 'missing x) nil))))
         
-;; start of unit tests for the set special form
-
-(deftest test_set_can_change_the_value_of_local_variable
-    (let (x 100)
-        (do (set x 200)
-            (assert (= x 200)))))
-            
-(deftest test_set_can_change_multiple_values
-    (let (x 100 y 200)
-        (do (set (x "hello") (y "world"))
-            (assert (= x "hello"))
-            (assert (= y "world")))))
-            
-(deftest test_set_previously_non_existent_of_value
-    (do (set x1 1)
-        (assert (= x1 1))))
-
-;; end of unit tests for the set special form
+(deftest test_range_produces_correctly_sized_list
+    (assert (= 10 (len (range 10)))))

@@ -8,6 +8,35 @@
     (do (let (x (+ 1 2 3))
         (assert (= x 6)))))
 
+;; start of unit tests for the set special form
+
+(deftest test_set_can_change_the_value_of_local_variable
+    (let (x 100)
+        (do (set x 200)
+            (assert (= x 200)))))
+            
+(deftest test_set_can_change_multiple_values
+    (let (x 100 y 200)
+        (do (set (x "hello") (y "world"))
+            (assert (= x "hello"))
+            (assert (= y "world")))))
+            
+(deftest test_set_previously_non_existent_of_value
+    (do (set x1 1)
+        (assert (= x1 1))))
+
+(deftest test_set_replaces_value_in_global_scope
+    (do (define x 10)
+        (set x 5)
+        (assert (= x 5))))
+
+(deftest test_set_replaces_value_in_outer_scope
+    (let (x 5) (do
+        ((lambda (a) (set x 6)) 1)
+        (assert (= x 6)))))
+
+;; end of unit tests for the set special form
+
 (deftest test_define_inside_let_is_accessible_outside_let
     (do (let (x 10) (define y 20))
         (assert (= y 20))))
