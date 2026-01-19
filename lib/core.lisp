@@ -71,3 +71,11 @@
     `(recursive-for (quote ,(car &))
     ,(car (cdr (cdr &)))
     (quote ,(car (cdr (cdr (cdr &)))))))
+
+;; range generates a list of numbers counting upwards towards 'n'
+(defn range (n)
+    (let (l nil i n) (do
+        (dowhile (> i 0) (do
+            (set i (- i 1) )
+            (set l (cons i l))))
+        l)))

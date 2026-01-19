@@ -1474,6 +1474,21 @@ static Object* eval_let_special_form(Env* env, Object* obj) {
     return res;
 }
 
+static void replace_value(Env* env, Object* name, Object* value) {
+    char* key;
+    Env* temp;
+
+    temp = env;
+    key = map_get(temp->map, name->data.str).key;
+
+    while (temp->prev != NULL && (key == NULL || strcmp(key, name->data.str) != 0)) {
+        temp = temp->prev;
+        key = map_get(temp->map, name->data.str).key;
+    }
+
+    env_put(temp, name->data.str, value);
+}
+
 /**
  * The set special form has two possible variations
  * (set <var> <val>)
@@ -1496,13 +1511,13 @@ static Object* eval_set_special_form(Env* env, Object* obj) {
         while (car(temp) != NULL) {
             name = car(car(temp));
             value = eval(env, car(cdr(car(temp))));
-            env_put(env, name->data.str, value);
+            replace_value(env, name, value);
             temp = cdr(temp);
         }
     } else {
         name = car(cdr(obj));
         value = eval(env, car(cdr(cdr(obj))));
-        env_put(env, name->data.str, value);
+        replace_value(env, name, value);
     }
     return NULL;
 }
