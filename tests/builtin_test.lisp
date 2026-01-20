@@ -161,6 +161,13 @@
 (deftest test_find_returns_nil_if_object_not_in_list
     (let (x '(a b c d e f))
         (assert (= (find 'missing x) nil))))
-        
+
+;; start of unit tests for the range function
+
 (deftest test_range_produces_correctly_sized_list
     (assert (= 10 (len (range 10)))))
+        
+(deftest test_range_works_with_large_numbers
+    (assert (= 20000 (len (range 20000)))))
+    
+;; end of unit tests for the range function
