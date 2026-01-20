@@ -33,6 +33,7 @@ typedef struct Env {
     struct Map* map;
     char marked;
     struct Env* prev;
+    struct Env* next_in_gc;
 } Env;
 
 /**
@@ -72,7 +73,7 @@ static void object_free(Object* obj);
 static Object* number_new(int num);
 static Object* symbol_new(char* symbol);
 static Object* string_new(char* str);
-static Object* function_new(struct Object* (*fn)(Env* env, struct Object** args));
+static Object* function_new(Env* env, struct Object* (*fn)(Env* env, struct Object** args));
 static Object* bool_new(char value);
 
 static void print(Object* obj);
@@ -110,12 +111,48 @@ static void map_free(Map* map);
 static Object* car(Object* obj);
 static Object* cdr(Object* obj);
 
+/**
+ * GC is used to implement a mark and sweep garbage collector
+ */
+typedef struct GC {
+    Object* tail;
+    size_t objects_at_last_collection;
+    size_t objects_since_last_collection;
+    Env* env;
+    Env* env_list;
+} GC;
+
+/* Instantiate the global reference to the garbage collector,
+ * I hate global variables but will allow this one. */
+static GC* gc;
+
+static GC* gc_new(void) {
+    GC* gc = malloc(sizeof(GC));
+    gc->objects_at_last_collection = 0;
+    gc->objects_since_last_collection = 0;
+    gc->env = NULL;
+    gc->env_list = NULL;
+    gc->tail = NULL;
+    return gc;
+}
+
+static void gc_set_root_env(GC* gc, Env* env) {
+    gc->env = env;
+}
+
 static Env* env_new(Env* prev) {
     Env* env;
     env = malloc(sizeof(Env));
     env->map = map_new(INITIAL_ENV_SIZE);
     env->marked = 0;
     env->prev = prev;
+    env->next_in_gc = NULL;
+
+    if (gc != NULL) {
+        env->next_in_gc = gc->env_list;
+        gc->env_list = env;
+    }
+
     return env;
 }
 
@@ -145,34 +182,6 @@ static void env_mark(Env* env) {
     }
 }
 
-static void env_unmark(Env* env) {
-    size_t j;
-    Map* map;
-    MapEntry* entries;
-    Object* obj;
-
-    if (env != NULL) {
-        map = env->map;
-        entries = map->data;
-
-        if (env->marked) {
-
-            env->marked = 0;
-
-            for (j = 0; j < map->size; j++) {
-                MapEntry entry = entries[j];
-                if (entry.key != NULL) {
-                    obj = entry.value;
-                    if (is_type(obj, FUNCTION) || is_type(obj, MACRO)) {
-                        env_unmark(obj->data.fn.env);
-                    }
-                }
-            }
-        }
-        env_unmark(env->prev);
-    }
-}
-
 static void env_put(Env* env, char* key, Object* obj) {
     map_put(env->map, key, obj);
 }
@@ -198,28 +207,6 @@ static void env_free(Env* env) {
         map_free(env->map);
         free(env);
     }
-}
-
-/**
- * GC is used to implement a mark and sweep garbage collector
- */
-typedef struct GC {
-    Object* tail;
-    size_t objects_at_last_collection;
-    size_t objects_since_last_collection;
-    Env* env;
-} GC;
-
-/* Instantiate the global reference to the garbage collector,
- * I hate global variables but will allow this one. */
-static GC* gc;
-
-static GC* gc_new(Env* env) {
-    GC* gc = malloc(sizeof(GC));
-    gc->objects_at_last_collection = 0;
-    gc->objects_since_last_collection = 0;
-    gc->env = env;
-    return gc;
 }
 
 /**
@@ -254,73 +241,121 @@ static char is_debug_enabled(Env* env) {
 }
 
 /**
- TODO: there's a bug with gc_mark/gc_sweep currently
- I think it's because I'm not un-marking environments after I'm finished with them, so their new objects
- don't get marked after the first sweep
+ * Mark phase - marks all reachable objects and environments
  */
 static void gc_mark(GC* gc) {
-
     Object* temp;
-    size_t count = 0;
-    size_t total = 0;
+    Env* env_temp;
+    size_t obj_count = 0;
+    size_t obj_total = 0;
+    size_t env_count = 0;
+    size_t env_total = 0;
 
+    /* Mark all reachable objects starting from root environment */
     env_mark(gc->env);
 
+    /* Count marked objects */
     temp = gc->tail;
     while (temp != NULL) {
         if (temp->marked) {
-            count++;
+            obj_count++;
         }
-        total++;
+        obj_total++;
         temp = temp->prev;
     }
 
-    if (is_debug_enabled(gc->env)) {
-        printf("marked %lu objects out of %lu total objects.\n", count, total);
+    /* Count marked environments */
+    env_temp = gc->env_list;
+    while (env_temp != NULL) {
+        if (env_temp->marked) {
+            env_count++;
+        }
+        env_total++;
+        env_temp = env_temp->next_in_gc;
     }
-    gc->objects_at_last_collection = total;
 
+    if (is_debug_enabled(gc->env)) {
+        printf("marked %lu objects out of %lu total objects.\n", obj_count, obj_total);
+        printf("marked %lu environments out of %lu total environments.\n", env_count, env_total);
+    }
+
+    gc->objects_at_last_collection = obj_total;
 }
 
+/**
+ * Sweep phase - frees all unmarked objects and environments
+ */
 static void gc_sweep(GC* gc) {
-
-    size_t count = 0;
+    Env* env_ptr;
+    Env* env_prev_in_gc;
+    Env* next_in_gc;
+    size_t obj_freed;
+    size_t env_freed;
+    Object* obj_ptr;
+    Object* prev;
     
-    Object* ptr = gc->tail;
+    obj_freed = 0;
+    env_freed = 0;
 
-    while (ptr != NULL) {
-        Object* prev = ptr->prev;   /* SAVE traversal pointer FIRST */
+    /* Sweep objects */
+    obj_ptr = gc->tail;
+    while (obj_ptr != NULL) {
+        prev = obj_ptr->prev;
 
-        if (!ptr->marked) {
-            /* unlink from list */
-            if (ptr->prev) {
-                ptr->prev->next = ptr->next;
+        if (!obj_ptr->marked) {
+            /* Unlink from object list */
+            if (obj_ptr->prev) {
+                obj_ptr->prev->next = obj_ptr->next;
             }
-            if (ptr->next) {
-                ptr->next->prev = ptr->prev;
+            if (obj_ptr->next) {
+                obj_ptr->next->prev = obj_ptr->prev;
+            }
+            if (obj_ptr == gc->tail) {
+                gc->tail = obj_ptr->prev;
             }
 
-            if (ptr == gc->tail) {
-                gc->tail = ptr->prev;
-            }
-
-            object_free(ptr);
-            count++;
+            object_free(obj_ptr);
+            obj_freed++;
         } else {
-            ptr->marked = 0;  /* unmark live objects */
+            obj_ptr->marked = 0;  /* Unmark for next collection */
         }
 
-        ptr = prev;  /* move safely */
+        obj_ptr = prev;
     }
+
+    /* Sweep environments */
+    env_ptr = gc->env_list;
+    env_prev_in_gc = NULL;
     
-    env_unmark(gc->env);
+    while (env_ptr != NULL) {
+        next_in_gc = env_ptr->next_in_gc;
+
+        if (!env_ptr->marked) {
+            /* Unlink from GC's environment list */
+            if (env_prev_in_gc) {
+                env_prev_in_gc->next_in_gc = next_in_gc;
+            } else {
+                gc->env_list = next_in_gc;
+            }
+
+            /* Free the environment */
+            map_free(env_ptr->map);
+            free(env_ptr);
+            env_freed++;
+        } else {
+            env_ptr->marked = 0;  /* Unmark for next collection */
+            env_prev_in_gc = env_ptr;
+        }
+
+        env_ptr = next_in_gc;
+    }
 
     gc->objects_since_last_collection = 0;
 
     if (is_debug_enabled(gc->env)) {
-        printf("freed %lu objects.\n", count);
+        printf("freed %lu objects.\n", obj_freed);
+        printf("freed %lu environments.\n", env_freed);
     }
-
 }
 
 static void gc_free(GC* gc) {
@@ -473,7 +508,7 @@ static Object* user_defined_macro_new(Env* env, Object* args, Object* body) {
     return obj;
 }
 
-static Object* function_new(struct Object* (*fn)(Env* env, struct Object** args)) {
+static Object* function_new(Env* env, struct Object* (*fn)(Env* env, struct Object** args)) {
     Function f;
     Object* obj = object_new();
     obj->type = FUNCTION;
@@ -482,13 +517,13 @@ static Object* function_new(struct Object* (*fn)(Env* env, struct Object** args)
     f.rest_arg = -1;
     f.args = NULL;
     f.body = NULL;
-    f.env = NULL;
+    f.env = env_new(env);
     f.fn = fn;
     obj->data.fn = f;
     return obj;
 }
 
-static Object* macro_new(struct Object* (*fn)(Env* env, struct Object** args)) {
+static Object* macro_new(Env* env, struct Object* (*fn)(Env* env, struct Object** args)) {
     Function f;
     Object* obj = object_new();
     obj->type = MACRO;
@@ -497,6 +532,7 @@ static Object* macro_new(struct Object* (*fn)(Env* env, struct Object** args)) {
     f.rest_arg = -1;
     f.args = NULL;
     f.body = NULL;
+    f.env = env_new(env);
     f.fn = fn;
     obj->data.fn = f;
     return obj;
@@ -936,6 +972,7 @@ static Object* open(Object* file_to_open) {
     }
 
     temp_string = read_string(fp);
+    fclose(fp);
     str = string_new(temp_string);
     free(temp_string);
     return str;
@@ -1311,11 +1348,11 @@ static char is_expr(Token* token) {
  * @param cons - the cons cell to test
  * @return - true if the provided cons cell is a special form
  */
-static char is_special_form(Object* cons) {
+static char is_special_form(Object* cons, char* form) {
     Object* first = car(cons);
     if (is_type(first, SYMBOL)) {
         char* sym = first->data.str;
-        if (strcmp(sym, "quote") == 0 ||
+        if ((strcmp(sym, "quote") == 0 ||
             strcmp(sym, "quasiquote") == 0 ||
             strcmp(sym, "eval") == 0 ||
             strcmp(sym, "define") == 0 ||
@@ -1324,8 +1361,9 @@ static char is_special_form(Object* cons) {
             strcmp(sym, "do") == 0 ||
             strcmp(sym, "let") == 0 ||
             strcmp(sym, "set") == 0 ||
-            strcmp(sym, "if") == 0) {
-            return 1;
+            strcmp(sym, "if") == 0) &&
+            strcmp(sym, form) == 0) {
+                return 1;
             }
     }
     return 0;
@@ -1363,7 +1401,7 @@ static Object* function_wrapper(Env* env, Object* function, Object* args[]) {
         i++;
     }
     
-    res = eval(env, function->data.fn.body);
+    res = function->data.fn.body;
     
     return res;
 }
@@ -1548,10 +1586,10 @@ static Object* eval_if_special_form(Env* env, Object* obj) {
     
     Object* result = eval(env, cond);
     if (is_truthy(result)) {
-        return eval(env, true_branch);
+        return true_branch;
     }
     
-    return eval(env, else_branch);
+    return else_branch;
 }
 
 static Object* eval_lambda_special_form(Env* env, Object* obj) {
@@ -1574,53 +1612,12 @@ static Object* eval_do_special_form(Env* env, Object* obj) {
     
     Object* res = NULL;
     Object* temp = cdr(obj);
-    while (car(temp) != NULL) {
+    while (cdr(temp) != NULL) {
         res = eval(env, car(temp));
         temp = cdr(temp);
     }
-    return res;
+    return car(temp);
     
-}
-
-/**
- * Evaluates the special form, uses the environment to store side effects
- * @param env - the interpreter environment
- * @param obj - an object representing the special form to be evaluated
- * @return - the result of evaluating the special form
- */
-static Object* eval_special_form(Env* env, Object* obj) {
-    Object* first = car(obj);
-    if (strcmp(first->data.str, "quote") == 0) {
-        return eval_quote_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "quasiquote") == 0) {
-        return eval_quasiquote_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "eval") == 0) {
-        return eval_eval_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "define") == 0) {
-        return eval_define_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "lambda") == 0) {
-        return eval_lambda_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "macro") == 0) {
-        return eval_macro_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "do") == 0) {
-        return eval_do_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "let") == 0) {
-        return eval_let_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "set") == 0) {
-        return eval_set_special_form(env, obj);
-    }
-    if (strcmp(first->data.str, "if") == 0) {
-        return eval_if_special_form(env, obj);
-    }
-    return NULL;
 }
 
 /**
@@ -1737,22 +1734,7 @@ static Object* apply(Env* env, Object* args[]) {
         cons = cdr(cons);
     }
 
-    return eval_function_call(env, cons_new(function, cons), 0);
-}
-
-/**
- * Evaluates a cons cell. In common with many lisps it first checks if it's a special form
- * and if not then assumes it's a function call.
- * @param env - the interpreter environment
- * @param obj - an object representing the list to be evaluated
- * @return - the result of evaluating the list
- */
-static Object* eval_list(Env* env, Object* obj) {
-    if (is_special_form(obj)) {
-        return eval_special_form(env, obj);
-    }
-
-    return eval_function_call(env, obj, 1);
+    return eval(env, cons_new(function, cons));
 }
 
 /**
@@ -1888,35 +1870,201 @@ Object* read(char* str) {
     return parse(&str);
 }
 
+Object* lookup_symbol(Env* env, Object* obj) {
+    /* if a symbol begins with : it's a keyword,
+     * keywords evaluate to themselves.
+     */
+    if (obj->data.str[0] == ':') {
+        return obj;
+    }
+
+    return env_get(env, obj->data.str).value;
+}
+
+void bind_function_args(Env* env, Object* function, Object* args[]) {
+
+    int i;
+    Object* temp;
+
+    i = 0;
+    temp = function->data.fn.args;
+
+    while (car(temp) != NULL) {
+        Object* name = car(temp);
+        env_put(env, name->data.str, args[i]);
+        temp = cdr(temp);
+        i++;
+    }
+}
+
 Object* eval(Env* env, Object* obj) {
-    Object* res = NULL;
-    MapEntry entry;
-    if (obj != NULL) {
-        switch (obj->type) {
-            case SYMBOL: {
-                /* if a symbol begins with : it's a keyword,
-                 * keywords evaluate to themselves.
-                 */
-                if (obj->data.str[0] == ':') {
-                    res = obj;
-                    break;
+    Object* expr;
+    Object* function;
+    Object* temp;
+    Object* args;
+    Object* arg;
+    Object* arg_array[MAX_FUNC_ARGS] = {0};
+    Object* rest;
+    Object* prev;
+    Object* v;
+    Object* expanded;
+    Env* macro_env;
+    
+    int i;
+    int j;
+    int arg_count;
+    int rest_arg;
+    char error_buff[255] = {0};
+
+    expr = obj;
+    if (expr != NULL) {
+        for (;;) {
+
+            if (expr == NULL) {
+                return expr;
+            }
+
+            switch (expr->type) {
+                case SYMBOL: {
+                    return lookup_symbol(env, expr);
                 }
-                
-                entry = env_get(env, obj->data.str);
-                res = entry.value;
-                break;
-            }
-            case CONS: {
-                res = eval_list(env, obj);
-                break;
-            }
-            default: {
-                res = obj;
-                break;
+                case CONS: {
+                    if (is_special_form(expr, "quote")) {
+                        return eval_quote_special_form(env, expr);
+                    } else if (is_special_form(expr, "quasiquote")) {
+                        return eval_quasiquote_special_form(env, expr);
+                    } else if (is_special_form(expr, "eval")) {
+                        return eval_eval_special_form(env, expr);
+                    } else if (is_special_form(expr, "define")) {
+                        return eval_define_special_form(env, expr);
+                    } else if (is_special_form(expr, "lambda")) {
+                        return eval_lambda_special_form(env, expr);
+                    } else if (is_special_form(expr, "macro")) {
+                        return eval_macro_special_form(env, expr);
+                    } else if (is_special_form(expr, "do")) {
+                        expr = eval_do_special_form(env, expr);
+                        continue;
+                    } else if (is_special_form(expr, "let")) {
+                        return eval_let_special_form(env, expr);
+                    } else if (is_special_form(expr, "set")) {
+                        return eval_set_special_form(env, expr);
+                    } else if (is_special_form(expr, "if")) {
+                        expr = eval_if_special_form(env, expr);
+                        continue;
+                    } else {
+
+                        function = eval(env, car(expr));
+                        if (function == NULL) {
+                            sprintf(error_buff, "name error: function '%s' is undefined", car(obj)->data.str);
+                            error_buff[254] = 0;
+                            return error_new(error_buff);
+                        }
+
+                        args = cdr(expr);
+                        temp = args;
+                        i = 0;
+                        arg_count = length(args);
+                        rest_arg = function->data.fn.rest_arg;
+
+                        while (car(temp) != NULL) {
+                            /* Don't evaluate args if the function is a macro */
+                            if (!function->data.fn.is_macro) {
+                                arg = eval(env, car(temp));
+                            } else {
+                                arg = car(temp);
+                            }
+                            arg_array[i++] = arg;
+                            temp = cdr(temp);
+                        }
+
+                        if (rest_arg != -1) {
+                            rest = cons_new(NULL, NULL);
+                            temp = rest;
+                            prev = temp;
+                            i = rest_arg;
+                            while (i >= 0 && i < arg_count) {
+                                setcar(temp, arg_array[i]);
+                                setcdr(temp, cons_new(NULL, NULL));
+                                arg_array[i] = NULL;
+                                prev = temp;
+                                temp = cdr(temp);
+                                i++;
+                            }
+                            setcdr(prev, NULL);
+                            arg_array[rest_arg] = rest;
+                        }
+
+                        /* Call the function */
+                        if (!function->data.fn.is_user_defined) {
+                            env = function->data.fn.env;
+                            /* ----- PRIMITIVE OR PRIMITIVE MACRO ----- */
+                            v = function->data.fn.fn(env, arg_array);
+
+                            /* if this primitive is a macro, evaluate its expansion */
+                            if (function->data.fn.is_macro) {
+                                expr = v;      /* expanded macro */
+                                continue;      /* evaluate it in the same loop */
+                            }
+
+                            /* normal primitive result */
+                            return v;
+
+                        } else {
+
+                            /* ----- USER-DEFINED MACRO ----- */
+                            if (function->data.fn.is_macro) {
+
+                                /* 1. Create new env for macro call */
+                                macro_env = env_new(env);
+                                bind_function_args(macro_env, function, arg_array);
+
+                                /* 2. Run the macro BODY (this is a real call, NOT TCO) */
+                                expanded =
+                                    eval(macro_env, function->data.fn.body);
+
+                                /* 3. Evaluate the expanded code in the ORIGINAL env */
+                                expr = expanded;
+                                continue;   /* jump back into eval on expanded code */
+                            }
+
+                            /* ----- USER-DEFINED FUNCTION (TAIL CALL) ----- */
+                            
+                            /* Check if this is a self-recursive tail call */
+                            Object* calling_fn = env_get(env, car(expr)->data.str).value;
+
+                            if (calling_fn == function) {
+                                /* SELF-RECURSIVE TAIL CALL */
+                                /* Reuse the current environment by rebinding arguments */
+
+                                /* Clear current bindings and rebind with new values */
+                                Object* arg_names = function->data.fn.args;
+                                j = 0;
+                                while (car(arg_names) != NULL) {
+                                    env_put(env, car(arg_names)->data.str, arg_array[j]);
+                                    arg_names = cdr(arg_names);
+                                    j++;
+                                }
+
+                                expr = function->data.fn.body;
+                                continue; /* TRUE TAIL CALL - same environment! */
+                            } else {
+                                /* Different function - create new environment */
+                                env = env_new(env);
+                                bind_function_args(env, function, arg_array);
+
+                                expr = function->data.fn.body;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                default: {
+                    return expr;
+                }
             }
         }
     }
-    return res;
+    return expr;
 }
 
 static void exec(Env* env, char* str) {
@@ -2105,6 +2253,7 @@ Object* builtin_import(Env* env, Object* args[]) {
     }
     
     str = read_string(fp);
+    fclose(fp);
     exec(env, str);
     free(str);
     return NULL;
@@ -2331,38 +2480,38 @@ static void init_env(Env* env) {
     env_put(env, "true", bool_new(1));
     env_put(env, "false", bool_new(0));
 
-    env_put(env, "apply", function_new(builtin_apply));
-    env_put(env, "car", function_new(builtin_car));
-    env_put(env, "setcar", function_new(builtin_setcar));
-    env_put(env, "cdr", function_new(builtin_cdr));
-    env_put(env, "setcdr", function_new(builtin_setcdr));
-    env_put(env, "type", function_new(builtin_type));
-    env_put(env, "cons", function_new(builtin_cons));
-    env_put(env, "print", function_new(builtin_print));
-    env_put(env, "import", function_new(builtin_import));
-    env_put(env, "list", function_new(builtin_list));
-    env_put(env, "read", function_new(builtin_read));
-    env_put(env, "append", function_new(builtin_append));
-    env_put(env, "error", function_new(builtin_error));
-    env_put(env, "copy", function_new(builtin_copy));
-    env_put(env, "len", function_new(builtin_len));
-    env_put(env, "find", function_new(builtin_find));
-    env_put(env, "last", function_new(builtin_last));
-    env_put(env, "open", function_new(builtin_open));
+    env_put(env, "apply", function_new(env, builtin_apply));
+    env_put(env, "car", function_new(env, builtin_car));
+    env_put(env, "setcar", function_new(env, builtin_setcar));
+    env_put(env, "cdr", function_new(env, builtin_cdr));
+    env_put(env, "setcdr", function_new(env, builtin_setcdr));
+    env_put(env, "type", function_new(env, builtin_type));
+    env_put(env, "cons", function_new(env, builtin_cons));
+    env_put(env, "print", function_new(env, builtin_print));
+    env_put(env, "import", function_new(env, builtin_import));
+    env_put(env, "list", function_new(env, builtin_list));
+    env_put(env, "read", function_new(env, builtin_read));
+    env_put(env, "append", function_new(env, builtin_append));
+    env_put(env, "error", function_new(env, builtin_error));
+    env_put(env, "copy", function_new(env, builtin_copy));
+    env_put(env, "len", function_new(env, builtin_len));
+    env_put(env, "find", function_new(env, builtin_find));
+    env_put(env, "last", function_new(env, builtin_last));
+    env_put(env, "open", function_new(env, builtin_open));
     
-    env_put(env, "macroexpand", function_new(builtin_macroexpand));
-    env_put(env, "macroexpand-1", function_new(builtin_macroexpand1));
+    env_put(env, "macroexpand", function_new(env, builtin_macroexpand));
+    env_put(env, "macroexpand-1", function_new(env, builtin_macroexpand1));
 
-    env_put(env, "gc-mark", function_new(builtin_mark));
-    env_put(env, "gc-sweep", function_new(builtin_sweep));
+    env_put(env, "gc-mark", function_new(env, builtin_mark));
+    env_put(env, "gc-sweep", function_new(env, builtin_sweep));
 
-    env_put(env, "=", function_new(builtin_equal));
-    env_put(env, ">", function_new(builtin_greater_than));
-    env_put(env, "<", function_new(builtin_less_than));
-    env_put(env, "+", function_new(builtin_plus));
-    env_put(env, "-", function_new(builtin_minus));
-    env_put(env, "*", function_new(builtin_multiply));
-    env_put(env, "/", function_new(builtin_divide));
+    env_put(env, "=", function_new(env, builtin_equal));
+    env_put(env, ">", function_new(env, builtin_greater_than));
+    env_put(env, "<", function_new(env, builtin_less_than));
+    env_put(env, "+", function_new(env, builtin_plus));
+    env_put(env, "-", function_new(env, builtin_minus));
+    env_put(env, "*", function_new(env, builtin_multiply));
+    env_put(env, "/", function_new(env, builtin_divide));
     
     exec(env, "(import \"lib/core.lisp\")");
 
@@ -2396,8 +2545,9 @@ int main(int argc, char *argv[]) {
     size_t successful_test_count = 0;
     size_t failed_test_count = 0;
     
+    gc = gc_new();
     Env* env = env_new(NULL);
-    gc = gc_new(env);
+    gc_set_root_env(gc, env);
     init_env(env);
 
     /* Command line arguments were provided */
