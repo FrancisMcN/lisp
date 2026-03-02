@@ -1383,28 +1383,6 @@ static char is_unquote(Object* obj) {
     return 0;
 }
 
-static Object* function_wrapper(Env* env, Object* function, Object* args[]) {
-    
-    Object* temp;
-    size_t i;
-    Object* res;
-    
-    temp = function->data.fn.args;
-    
-    /* Store function arguments inside local environment */
-    i = 0;
-    while (car(temp) != NULL) {
-        Object* name = car(temp);
-        env_put(env, name->data.str, args[i]);
-        temp = cdr(temp);
-        i++;
-    }
-    
-    res = function->data.fn.body;
-    
-    return res;
-}
-
 static Object* eval_eval_special_form(Env* env, Object* obj) {
     return eval(env, eval(env, car(cdr(obj))));
 }
@@ -1653,7 +1631,7 @@ static Object* expand_macro_call(Env* env, Object* macro) {
     int arg_count;
     int rest_arg;
 
-    // Get the macro function
+    /* Get the macro function */
     function = eval(env, car(macro));
     
     if (function == NULL || !function->data.fn.is_macro) {
@@ -1700,86 +1678,6 @@ static Object* expand_macro_call(Env* env, Object* macro) {
         bind_function_args(macro_env, function, arg_array);
         return eval(macro_env, function->data.fn.body);
     }
-}
-
-/**
- * Evaluates a cons cell representing a function call
- * @param env - the interpreter environment
- * @param obj - the object representing a function call
- * @return - the result of evaluating the function
- */
-static Object* eval_function_call(Env* env, Object* obj, char expand_macro) {
-
-    Object* function;
-    Object* temp;
-    Object* args;
-    Object* arg;
-    Object* arg_array[MAX_FUNC_ARGS] = {0};
-    Object* rest;
-    Object* prev;
-    Object* result;
-    int i;
-    int arg_count;
-    int rest_arg;
-    char error_buff[255] = {0};
-
-    function = eval(env, car(obj));
-    
-    if (function == NULL) {
-        sprintf(error_buff, "name error: function '%s' is undefined", car(obj)->data.str);
-        error_buff[254] = 0;
-        return error_new(error_buff);
-    }
-
-    args = cdr(obj);
-    arg_count = length(args);
-    rest_arg = function->data.fn.rest_arg;
-
-    temp = args;
-    i = 0;
-    while (car(temp) != NULL || i < arg_count) {
-        
-        /* Don't evaluate args if the function is a macro */
-        if (!function->data.fn.is_macro) {
-            arg = eval(env, car(temp));
-        } else {
-            arg = car(temp);
-        }
-
-        arg_array[i++] = arg;
-        temp = cdr(temp);
-    }
-
-    if (rest_arg != -1) {
-        rest = cons_new(NULL, NULL);
-        temp = rest;
-        prev = temp;
-        i = rest_arg;
-        while (i >= 0 && i < arg_count) {
-            setcar(temp, arg_array[i]);
-            setcdr(temp, cons_new(NULL, NULL));
-            arg_array[i] = NULL;
-            prev = temp;
-            temp = cdr(temp);
-            i++;
-        }
-        setcdr(prev, NULL);
-        arg_array[rest_arg] = rest;
-    }
-    
-    /* Call the function */
-    if (!function->data.fn.is_user_defined) {
-        result = function->data.fn.fn(env_new(env), arg_array);
-    } else {
-        result = function_wrapper(env_new(env), function, arg_array);
-    }
-
-    /* If function was a macro then evaluate the result */
-    if (expand_macro && function->data.fn.is_macro) {
-        result = eval(env, result);
-    }
-
-    return result;
 }
 
 static Object* apply(Env* env, Object* args[]) {
@@ -1974,7 +1872,7 @@ Object* eval(Env* env, Object* obj) {
     Object* prev;
     Object* v;
     Object* expanded;
-    Env* macro_env;
+    Object* calling_fn;
     
     int i;
     int j;
@@ -2090,7 +1988,7 @@ Object* eval(Env* env, Object* obj) {
                             /* ----- USER-DEFINED FUNCTION (TAIL CALL) ----- */
                             
                             /* Check if this is a self-recursive tail call */
-                            Object* calling_fn = env_get(env, car(expr)->data.str).value;
+                            calling_fn = env_get(env, car(expr)->data.str).value;
 
                             if (calling_fn == function) {
                                 /* SELF-RECURSIVE TAIL CALL */
@@ -2599,11 +2497,12 @@ char is_test_file(char* filename) {
 int main(int argc, char *argv[]) {
 
     int temp;
+    Env* env;
     size_t successful_test_count = 0;
     size_t failed_test_count = 0;
     
     gc = gc_new();
-    Env* env = env_new(NULL);
+    env = env_new(NULL);
     gc_set_root_env(gc, env);
     init_env(env);
 
