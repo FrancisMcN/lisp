@@ -1635,14 +1635,14 @@ static Object* expand_macro_call(Env* env, Object* macro) {
     function = eval(env, car(macro));
     
     if (function == NULL || !function->data.fn.is_macro) {
-        return macro;  // Not a macro, return as-is
+        return macro;  /* Not a macro, return as-is */
     }
 
     args = cdr(macro);
     arg_count = length(args);
     rest_arg = function->data.fn.rest_arg;
 
-    // Collect arguments WITHOUT evaluating
+    /* Collect arguments WITHOUT evaluating */
     temp = args;
     i = 0;
     while (car(temp) != NULL) {
@@ -1650,7 +1650,7 @@ static Object* expand_macro_call(Env* env, Object* macro) {
         temp = cdr(temp);
     }
 
-    // Handle rest arguments
+    /* Handle rest arguments */
     if (rest_arg != -1) {
         rest = cons_new(NULL, NULL);
         temp = rest;
@@ -1668,12 +1668,12 @@ static Object* expand_macro_call(Env* env, Object* macro) {
         arg_array[rest_arg] = rest;
     }
 
-    // Expand the macro
+    /* Expand the macro */
     if (!function->data.fn.is_user_defined) {
-        // Primitive macro
+        /* Primitive macro */
         return function->data.fn.fn(env, arg_array);
     } else {
-        // User-defined macro
+        /* User-defined macro */
         macro_env = env_new(env);
         bind_function_args(macro_env, function, arg_array);
         return eval(macro_env, function->data.fn.body);
@@ -2107,7 +2107,7 @@ static Object* macroexpand1(Env* env, Object* macro) {
 static Object* macroexpand(Env* env, Object* macro) {
     Object* expanded = macroexpand1(env, macro);
     
-    // Keep expanding if result is still a macro call
+    /* Keep expanding if result is still a macro call */
     if (is_type(expanded, CONS)) {
         Object* expanded_car = eval(env, car(expanded));
         if (expanded_car != NULL && is_type(expanded_car, FUNCTION) &&
