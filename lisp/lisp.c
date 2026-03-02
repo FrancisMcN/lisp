@@ -339,8 +339,7 @@ static void gc_sweep(GC* gc) {
             }
 
             /* Free the environment */
-            map_free(env_ptr->map);
-            free(env_ptr);
+            env_free(env_ptr);
             env_freed++;
         } else {
             env_ptr->marked = 0;  /* Unmark for next collection */
@@ -400,8 +399,8 @@ static void object_mark(Object* obj) {
                 if (obj->data.fn.is_user_defined) {
                     object_mark(fn.args);
                     object_mark(fn.body);
-                    env_mark(fn.env);
                 }
+                env_mark(fn.env);
                 break;
             }
             case CONS: {
@@ -1384,28 +1383,6 @@ static char is_unquote(Object* obj) {
     return 0;
 }
 
-static Object* function_wrapper(Env* env, Object* function, Object* args[]) {
-    
-    Object* temp;
-    size_t i;
-    Object* res;
-    
-    temp = function->data.fn.args;
-    
-    /* Store function arguments inside local environment */
-    i = 0;
-    while (car(temp) != NULL) {
-        Object* name = car(temp);
-        env_put(env, name->data.str, args[i]);
-        temp = cdr(temp);
-        i++;
-    }
-    
-    res = function->data.fn.body;
-    
-    return res;
-}
-
 static Object* eval_eval_special_form(Env* env, Object* obj) {
     return eval(env, eval(env, car(cdr(obj))));
 }
@@ -1620,54 +1597,60 @@ static Object* eval_do_special_form(Env* env, Object* obj) {
     
 }
 
-/**
- * Evaluates a cons cell representing a function call
- * @param env - the interpreter environment
- * @param obj - the object representing a function call
- * @return - the result of evaluating the function
- */
-static Object* eval_function_call(Env* env, Object* obj, char expand_macro) {
+void bind_function_args(Env* env, Object* function, Object* args[]) {
 
+    int i;
+    Object* temp;
+
+    i = 0;
+    temp = function->data.fn.args;
+
+    while (car(temp) != NULL) {
+        Object* name = car(temp);
+        env_put(env, name->data.str, args[i]);
+        temp = cdr(temp);
+        i++;
+    }
+}
+
+/**
+ * Helper function to expand a macro call without evaluating the result
+ * @param env - the interpreter environment
+ * @param macro - the macro call expression
+ * @return - the expanded macro (unevaluated)
+ */
+static Object* expand_macro_call(Env* env, Object* macro) {
     Object* function;
     Object* temp;
     Object* args;
-    Object* arg;
     Object* arg_array[MAX_FUNC_ARGS] = {0};
     Object* rest;
     Object* prev;
-    Object* result;
+    Env* macro_env;
     int i;
     int arg_count;
     int rest_arg;
-    char error_buff[255] = {0};
 
-    function = eval(env, car(obj));
+    /* Get the macro function */
+    function = eval(env, car(macro));
     
-    if (function == NULL) {
-        sprintf(error_buff, "name error: function '%s' is undefined", car(obj)->data.str);
-        error_buff[254] = 0;
-        return error_new(error_buff);
+    if (function == NULL || !function->data.fn.is_macro) {
+        return macro;  /* Not a macro, return as-is */
     }
 
-    args = cdr(obj);
+    args = cdr(macro);
     arg_count = length(args);
     rest_arg = function->data.fn.rest_arg;
 
+    /* Collect arguments WITHOUT evaluating */
     temp = args;
     i = 0;
-    while (car(temp) != NULL || i < arg_count) {
-        
-        /* Don't evaluate args if the function is a macro */
-        if (!function->data.fn.is_macro) {
-            arg = eval(env, car(temp));
-        } else {
-            arg = car(temp);
-        }
-
-        arg_array[i++] = arg;
+    while (car(temp) != NULL) {
+        arg_array[i++] = car(temp);
         temp = cdr(temp);
     }
 
+    /* Handle rest arguments */
     if (rest_arg != -1) {
         rest = cons_new(NULL, NULL);
         temp = rest;
@@ -1684,20 +1667,17 @@ static Object* eval_function_call(Env* env, Object* obj, char expand_macro) {
         setcdr(prev, NULL);
         arg_array[rest_arg] = rest;
     }
-    
-    /* Call the function */
+
+    /* Expand the macro */
     if (!function->data.fn.is_user_defined) {
-        result = function->data.fn.fn(env_new(env), arg_array);
+        /* Primitive macro */
+        return function->data.fn.fn(env, arg_array);
     } else {
-        result = function_wrapper(env_new(env), function, arg_array);
+        /* User-defined macro */
+        macro_env = env_new(env);
+        bind_function_args(macro_env, function, arg_array);
+        return eval(macro_env, function->data.fn.body);
     }
-
-    /* If function was a macro then evaluate the result */
-    if (expand_macro && function->data.fn.is_macro) {
-        result = eval(env, result);
-    }
-
-    return result;
 }
 
 static Object* apply(Env* env, Object* args[]) {
@@ -1881,22 +1861,6 @@ Object* lookup_symbol(Env* env, Object* obj) {
     return env_get(env, obj->data.str).value;
 }
 
-void bind_function_args(Env* env, Object* function, Object* args[]) {
-
-    int i;
-    Object* temp;
-
-    i = 0;
-    temp = function->data.fn.args;
-
-    while (car(temp) != NULL) {
-        Object* name = car(temp);
-        env_put(env, name->data.str, args[i]);
-        temp = cdr(temp);
-        i++;
-    }
-}
-
 Object* eval(Env* env, Object* obj) {
     Object* expr;
     Object* function;
@@ -1908,7 +1872,7 @@ Object* eval(Env* env, Object* obj) {
     Object* prev;
     Object* v;
     Object* expanded;
-    Env* macro_env;
+    Object* calling_fn;
     
     int i;
     int j;
@@ -2013,24 +1977,18 @@ Object* eval(Env* env, Object* obj) {
 
                             /* ----- USER-DEFINED MACRO ----- */
                             if (function->data.fn.is_macro) {
-
-                                /* 1. Create new env for macro call */
-                                macro_env = env_new(env);
-                                bind_function_args(macro_env, function, arg_array);
-
-                                /* 2. Run the macro BODY (this is a real call, NOT TCO) */
-                                expanded =
-                                    eval(macro_env, function->data.fn.body);
-
-                                /* 3. Evaluate the expanded code in the ORIGINAL env */
+                                /* Expand the macro using the helper */
+                                expanded = expand_macro_call(env, expr);
+                                
+                                /* Evaluate the expanded code in the ORIGINAL env */
                                 expr = expanded;
-                                continue;   /* jump back into eval on expanded code */
+                                continue;
                             }
 
                             /* ----- USER-DEFINED FUNCTION (TAIL CALL) ----- */
                             
                             /* Check if this is a self-recursive tail call */
-                            Object* calling_fn = env_get(env, car(expr)->data.str).value;
+                            calling_fn = env_get(env, car(expr)->data.str).value;
 
                             if (calling_fn == function) {
                                 /* SELF-RECURSIVE TAIL CALL */
@@ -2137,30 +2095,27 @@ static void exec_tests(Env* env, char* filename, char* str, size_t* pass_count, 
  */
 
 /**
- * Performs one expansion of a macro, if the macro expands into another macro
- * the second macro will be returned unexpanded.
- * @param macro - the macro to be expanded once
- * @return - the expanded macro
+ * Performs one expansion of a macro
  */
 static Object* macroexpand1(Env* env, Object* macro) {
-    return eval_function_call(env, macro, 0);
+    return expand_macro_call(env, macro);
 }
 
 /**
  * Repeatedly expand the macro until the result is no longer a macro
- * @param macro - the macro to be expanded
- * @return - the expanded macro
  */
 static Object* macroexpand(Env* env, Object* macro) {
     Object* expanded = macroexpand1(env, macro);
-    if (is_type(expanded, MACRO)) {
-        return macroexpand(env, expanded);
-    } else if (is_type(expanded, CONS)) {
+    
+    /* Keep expanding if result is still a macro call */
+    if (is_type(expanded, CONS)) {
         Object* expanded_car = eval(env, car(expanded));
-        if (is_type(expanded_car, MACRO)) {
+        if (expanded_car != NULL && is_type(expanded_car, FUNCTION) &&
+            expanded_car->data.fn.is_macro) {
             return macroexpand(env, expanded);
         }
     }
+    
     return expanded;
 }
 
@@ -2542,11 +2497,12 @@ char is_test_file(char* filename) {
 int main(int argc, char *argv[]) {
 
     int temp;
+    Env* env;
     size_t successful_test_count = 0;
     size_t failed_test_count = 0;
     
     gc = gc_new();
-    Env* env = env_new(NULL);
+    env = env_new(NULL);
     gc_set_root_env(gc, env);
     init_env(env);
 

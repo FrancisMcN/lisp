@@ -96,6 +96,10 @@
     (let (m2 (macro (y) `(+ ,y ,y)) m1 (macro (x) `(m2 ,x)))
         (assert (= (macroexpand '(m1 6)) '(+ 6 6)))))
 
+(deftest test_macroexpand_does_not_segfault
+    (let (m (macroexpand '(defn x (a) a)))
+        (assert (= (type m) "cons"))))
+
 (deftest test_dotimes_runs_code_multiple_times
     (do (define x 0)
         (dotimes (define x (+ x 1)) 5)
