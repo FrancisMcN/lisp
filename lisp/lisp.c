@@ -1878,6 +1878,7 @@ Object* eval(Env* env, Object* obj) {
     Env* frame_env = NULL;
     
     int i;
+    int j;
     int arg_count;
     int rest_arg;
     char error_buff[255] = {0};
@@ -1921,7 +1922,7 @@ Object* eval(Env* env, Object* obj) {
 
                         function = eval(env, car(expr));
 
-                        if (function == NULL || (!is_type(function, FUNCTION) && !is_type(function, MACRO))) {
+                        if (function == NULL || (function->type != FUNCTION && function->type != MACRO)) {
                             sprintf(error_buff, "type error: car of list is not a function or macro.");
                             error_buff[254] = 0;
                             return error_new(error_buff);
