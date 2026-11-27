@@ -20,7 +20,7 @@
 (defmacro cond (&)
     (do
         (if (> (len &) 2)
-            `(if ,(car &) ,(car (cdr &)) ,(apply cond (cdr (cdr &))))
+            `(if ,(car &) ,(car (cdr &)) ,(macroexpand (cons 'cond (cdr (cdr &)))))
             `(if ,(car &) ,(car (cdr &))))))
 
 ;; 'assert' is currently intended for unit testing but may be expanded
