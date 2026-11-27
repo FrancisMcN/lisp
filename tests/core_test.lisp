@@ -30,3 +30,6 @@
 
 (deftest test_function_call_with_zero_args
     (assert ((lambda () true))))
+
+(deftest test_non_function_at_head_of_list_produces_error
+    (assert (= (type (5 1 2)) "error")))

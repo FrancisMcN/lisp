@@ -690,6 +690,8 @@ static void map_resize(Map* map) {
     for (i = 0; i < map->size; i++) {
         if (map->data[i].key != NULL) {
             map_put(new_map, map->data[i].key, map->data[i].value);
+            /* map_put creates a new key, so free the old key after copying */
+            free(map->data[i].key);
         }
     }
     
@@ -873,27 +875,27 @@ static Object* type(Object* obj) {
 }
 
 static Object* car(Object* obj) {
-    if (obj != NULL && obj->type == CONS) {
+    if (obj != NULL && is_type(obj, CONS)) {
         return obj->data.cons.car;
     }
     return NULL;
 }
 
 static void setcar(Object* obj, Object* value) {
-    if (obj != NULL && obj->type == CONS) {
+    if (obj != NULL && is_type(obj, CONS)) {
         obj->data.cons.car = value;
     }
 }
 
 static Object* cdr(Object* obj) {
-    if (obj != NULL && obj->type == CONS) {
+    if (obj != NULL && is_type(obj, CONS)) {
         return obj->data.cons.cdr;
     }
     return NULL;
 }
 
 static void setcdr(Object* obj, Object* value) {
-    if (obj != NULL && obj->type == CONS) {
+    if (obj != NULL && is_type(obj, CONS)) {
         obj->data.cons.cdr = value;
     }
 }
@@ -1000,7 +1002,7 @@ static void fprint(FILE* fp, Object* obj) {
             putc('(', fp);
             temp = obj;
             while (temp != NULL) {
-                if (temp->type == CONS) {
+                if (is_type(temp, CONS)) {
                     fprint(fp, car(temp));
                 } else {
                     fprint(fp, temp);
@@ -1523,7 +1525,7 @@ static Object* eval_set_special_form(Env* env, Object* obj) {
     /* to modify multiple variables */
     if (is_type(car(cdr(obj)), CONS)) {
         temp = cdr(obj);
-        while (car(temp) != NULL) {
+        while (temp != NULL) {
             name = car(car(temp));
             value = eval(env, car(cdr(car(temp))));
             replace_value(env, name, value);
@@ -1605,7 +1607,7 @@ void bind_function_args(Env* env, Object* function, Object* args[]) {
     i = 0;
     temp = function->data.fn.args;
 
-    while (car(temp) != NULL) {
+    while (temp != NULL) {
         Object* name = car(temp);
         env_put(env, name->data.str, args[i]);
         temp = cdr(temp);
@@ -1645,7 +1647,7 @@ static Object* expand_macro_call(Env* env, Object* macro) {
     /* Collect arguments WITHOUT evaluating */
     temp = args;
     i = 0;
-    while (car(temp) != NULL) {
+    while (temp != NULL) {
         arg_array[i++] = car(temp);
         temp = cdr(temp);
     }
@@ -1872,10 +1874,10 @@ Object* eval(Env* env, Object* obj) {
     Object* prev;
     Object* v;
     Object* expanded;
-    Object* calling_fn;
+    Object* frame_fn = NULL;
+    Env* frame_env = NULL;
     
     int i;
-    int j;
     int arg_count;
     int rest_arg;
     char error_buff[255] = {0};
@@ -1918,8 +1920,9 @@ Object* eval(Env* env, Object* obj) {
                     } else {
 
                         function = eval(env, car(expr));
-                        if (function == NULL) {
-                            sprintf(error_buff, "name error: function '%s' is undefined", car(obj)->data.str);
+
+                        if (function == NULL || (!is_type(function, FUNCTION) && !is_type(function, MACRO))) {
+                            sprintf(error_buff, "type error: car of list is not a function or macro.");
                             error_buff[254] = 0;
                             return error_new(error_buff);
                         }
@@ -1930,7 +1933,7 @@ Object* eval(Env* env, Object* obj) {
                         arg_count = length(args);
                         rest_arg = function->data.fn.rest_arg;
 
-                        while (car(temp) != NULL) {
+                        while (temp != NULL) {
                             /* Don't evaluate args if the function is a macro */
                             if (!function->data.fn.is_macro) {
                                 arg = eval(env, car(temp));
@@ -1960,7 +1963,6 @@ Object* eval(Env* env, Object* obj) {
 
                         /* Call the function */
                         if (!function->data.fn.is_user_defined) {
-                            env = function->data.fn.env;
                             /* ----- PRIMITIVE OR PRIMITIVE MACRO ----- */
                             v = function->data.fn.fn(env, arg_array);
 
@@ -1987,32 +1989,21 @@ Object* eval(Env* env, Object* obj) {
 
                             /* ----- USER-DEFINED FUNCTION (TAIL CALL) ----- */
                             
-                            /* Check if this is a self-recursive tail call */
-                            calling_fn = env_get(env, car(expr)->data.str).value;
-
-                            if (calling_fn == function) {
-                                /* SELF-RECURSIVE TAIL CALL */
-                                /* Reuse the current environment by rebinding arguments */
-
-                                /* Clear current bindings and rebind with new values */
-                                Object* arg_names = function->data.fn.args;
-                                j = 0;
-                                while (car(arg_names) != NULL) {
-                                    env_put(env, car(arg_names)->data.str, arg_array[j]);
-                                    arg_names = cdr(arg_names);
-                                    j++;
-                                }
-
-                                expr = function->data.fn.body;
-                                continue; /* TRUE TAIL CALL - same environment! */
+                            /* Always give the call a fresh frame. If we are still executing in
+                             * the frame this loop created for the same function (i.e. we got here
+                             * through tail positions only), replace that frame instead of stacking
+                             * a new one on top of it. */
+                            if (function == frame_fn && env == frame_env) {
+                                env = env_new(frame_env->prev);
                             } else {
-                                /* Different function - create new environment */
                                 env = env_new(env);
-                                bind_function_args(env, function, arg_array);
-
-                                expr = function->data.fn.body;
-                                continue;
                             }
+                            bind_function_args(env, function, arg_array);
+                            frame_fn = function;
+                            frame_env = env;
+
+                            expr = function->data.fn.body;
+                            continue;
                         }
                     }
                 }
@@ -2038,7 +2029,7 @@ static void exec(Env* env, char* str) {
          print errors to stderr and regular objects
          to stdout.
          */
-        if (res != NULL && res->type == ERROR) {
+        if (res != NULL && is_type(res, ERROR)) {
             fprint(stderr, res);
             printf("\n");
             break;
@@ -2075,7 +2066,7 @@ static void exec_tests(Env* env, char* filename, char* str, size_t* pass_count, 
         if (first != NULL && strcmp(first->data.str, "deftest") == 0) {
             Object* test_name = car(cdr(obj));
             obj = eval(env, obj);
-            if (obj != NULL && obj->type == BOOL && obj->data.num == 1) {
+            if (obj != NULL && is_type(obj, BOOL) && obj->data.num == 1) {
                 printf("PASS ");
                 (*pass_count)++;
             } else {
@@ -2110,7 +2101,7 @@ static Object* macroexpand(Env* env, Object* macro) {
     /* Keep expanding if result is still a macro call */
     if (is_type(expanded, CONS)) {
         Object* expanded_car = eval(env, car(expanded));
-        if (expanded_car != NULL && is_type(expanded_car, FUNCTION) &&
+        if (expanded_car != NULL && is_type(expanded_car, MACRO) &&
             expanded_car->data.fn.is_macro) {
             return macroexpand(env, expanded);
         }
